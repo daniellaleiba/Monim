@@ -1,0 +1,187 @@
+{% extends "layout.html" %}
+
+{% block title %}תאגידים{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">ניהול תאגידים</h1>
+        <p class="page-subtitle">{{ clients|length }} תאגידים במערכת</p>
+    </div>
+    <button class="btn btn-primary" onclick="openModal('modal-create')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        תאגיד חדש
+    </button>
+</div>
+
+{% if clients %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>שם תאגיד</th>
+                <th>מספר רשות</th>
+                <th>תאריך יצירה</th>
+                <th>פעולות</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for client in clients %}
+            <tr>
+                <td><span style="color: var(--gray-500); font-weight: 600; font-variant-numeric: tabular-nums;">{{ loop.index }}</span></td>
+                <td>
+                    <a href="{{ url_for('periods.periods', client_id=client.client_id) }}"
+                       style="color: var(--primary); font-weight: 600; text-decoration: none;">
+                        {{ client.name }}
+                    </a>
+                </td>
+                <td class="ltr-value" style="font-family: monospace;">{{ client.corporation_number }}</td>
+                <td style="color: var(--gray-500); font-size: 13px;">
+                    {{ client.created_at.strftime('%d/%m/%Y') if client.created_at else '—' }}
+                </td>
+                <td>
+                    <div class="table-actions">
+                        <button class="icon-btn"
+                            data-id="{{ client.client_id }}"
+                            data-name="{{ client.name }}"
+                            data-corp="{{ client.corporation_number }}"
+                            data-city="{{ client.city or '' }}"
+                            onclick="openEditModal(this)"
+                            title="עריכה" aria-label="עריכה">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l.9-3.6L15.5 6 18 8.5 7.4 19 4 20Z"/><path d="M13.5 7.5l3 3"/></svg>
+                        </button>
+                        <button class="icon-btn icon-btn-danger"
+                            data-id="{{ client.client_id }}"
+                            data-name="{{ client.name }}"
+                            onclick="openDeleteModal(this)"
+                            title="מחיקה" aria-label="מחיקה">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M7 7l1 12a1.5 1.5 0 0 0 1.5 1.4h5a1.5 1.5 0 0 0 1.5-1.4L17 7"/></svg>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% else %}
+<div class="table-wrapper">
+    <div class="empty-state">
+        <div class="empty-state-icon" style="color: var(--gray-300); display:flex; justify-content:center;"><svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><rect x="8" y="7" width="3" height="3"/><rect x="13" y="7" width="3" height="3"/><rect x="8" y="12" width="3" height="3"/><rect x="13" y="12" width="3" height="3"/></svg></div>
+        <div class="empty-state-title">אין תאגידים עדיין</div>
+        <div class="empty-state-text">לחץ על "תאגיד חדש" כדי להוסיף את התאגיד הראשון</div>
+    </div>
+</div>
+{% endif %}
+
+
+<!-- Modal: יצירת תאגיד חדש -->
+<div id="modal-create" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">תאגיד חדש</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" action="{{ url_for('clients.create_client') }}">
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label" for="create-name">שם התאגיד *</label>
+                <input class="form-input" type="text" id="create-name" name="name"
+                    placeholder="לדוגמה: תאגיד המים נתניה" required autofocus>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="create-corp">מספר רשות *</label>
+                <input class="form-input ltr-value" type="text" id="create-corp" name="corporation_number"
+                    placeholder="לדוגמה: 512345678" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="create-city">עיר</label>
+                <input class="form-input" type="text" id="create-city" name="city"
+                    placeholder="לדוגמה: נתניה">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">צור תאגיד</button>
+        </div>
+    </form>
+</div>
+
+
+<!-- Modal: עריכת תאגיד -->
+<div id="modal-edit" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">עריכת תאגיד</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" id="edit-form">
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label" for="edit-name">שם התאגיד</label>
+                <input class="form-input" type="text" id="edit-name" name="name">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="edit-corp">מספר רשות</label>
+                <input class="form-input ltr-value" type="text" id="edit-corp" name="corporation_number">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="edit-city">עיר</label>
+                <input class="form-input" type="text" id="edit-city" name="city">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">שמור שינויים</button>
+        </div>
+    </form>
+</div>
+
+
+<!-- Modal: אישור מחיקה -->
+<div id="modal-delete" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">מחיקת תאגיד</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" id="delete-form">
+        <div class="modal-body">
+            <p class="confirm-text">
+                האם למחוק את התאגיד <strong id="delete-client-name"></strong>?
+            </p>
+            <div class="confirm-warning">
+                ⚠️ פעולה זו תמחק את כל הנתונים הקשורים לתאגיד זה (תקופות, מונים, קריאות).
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-danger">כן, מחק</button>
+        </div>
+    </form>
+</div>
+
+
+<script>
+function openEditModal(btn) {
+    const id   = btn.dataset.id;
+    const name = btn.dataset.name;
+    const corp = btn.dataset.corp;
+    const city = btn.dataset.city || '';
+    document.getElementById('edit-form').action = '/clients/' + id + '/edit';
+    document.getElementById('edit-name').value  = name;
+    document.getElementById('edit-corp').value  = corp;
+    document.getElementById('edit-city').value  = city;
+    openModal('modal-edit');
+}
+
+function openDeleteModal(btn) {
+    const id   = btn.dataset.id;
+    const name = btn.dataset.name;
+    document.getElementById('delete-form').action = '/clients/' + id + '/delete';
+    document.getElementById('delete-client-name').textContent = name;
+    openModal('modal-delete');
+}
+</script>
+
+{% endblock %}

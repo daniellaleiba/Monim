@@ -1,0 +1,166 @@
+{% extends "layout.html" %}
+
+{% block title %}דשבורד{% endblock %}
+
+{% block content %}
+<div class="dashboard-page">
+
+    {# TODO (משימת פיתוח): current_user_display_name עדיין לא מגיע מה-view/session - להחליף לשם המשתמש המחובר בפועל. גם today_hebrew צריך להיות מועבר מה-view (פורמט "יום X, DD בחודש YYYY" בעברית). #}
+    <div class="page-header page-header-greeting">
+        <h1 class="page-title">שלום, {{ current_user_display_name or 'משתמש' }} 👋</h1>
+        <p class="page-subtitle">סקירה כללית של מצב המערכת · {{ today_hebrew or '' }}</p>
+    </div>
+
+    {# KPI-ים דינמיים: total_clients / total_active_periods / total_meters / total_open_folders / total_active_readers / total_approved_readings - כולם ints מה-view, כבר קיימים #}
+    <div class="kpi-grid">
+
+        <!-- תאגידים -->
+        <a href="{{ url_for('clients.clients') }}" class="kpi-card kpi-clients">
+            <div class="kpi-icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><rect x="8" y="7" width="3" height="3"/><rect x="13" y="7" width="3" height="3"/><rect x="8" y="12" width="3" height="3"/><rect x="13" y="12" width="3" height="3"/></svg></div>
+            {# TODO (משימת פיתוח): השוואת total_clients לעומת הקודמת. #}
+            <div class="kpi-trend-badge kpi-trend-placeholder">—</div>
+            <div class="kpi-body">
+                <div class="kpi-number">{{ total_clients }}</div>
+                <div class="kpi-label">תאגידים במערכת</div>
+            </div>
+        </a>
+
+        <!-- תקופות פעילות -->
+        {% if first_client_id %}
+        <a href="{{ url_for('periods.periods', client_id=first_client_id) }}" class="kpi-card kpi-periods">
+        {% else %}
+        <a href="{{ url_for('clients.clients') }}" class="kpi-card kpi-periods">
+        {% endif %}
+            <div class="kpi-icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg></div>
+            {# TODO (משימת פיתוח): השוואת total_active_periods לעומת הקודמת (מציג "ללא שינוי" או ערך חדש). #}
+            <div class="kpi-trend-badge kpi-trend-placeholder">—</div>
+            <div class="kpi-body">
+                <div class="kpi-number">{{ total_active_periods }}</div>
+                <div class="kpi-label">תקופות פעילות</div>
+            </div>
+        </a>
+
+        <!-- מונים -->
+        {# TODO (משימת פיתוח): באדג' מגמה (למשל "+4.2%") + מיני-גרף (sparkline) לצד המספר, מבוססים על השוואת total_meters לתקופה הקודמת + סדרת נתונים היסטורית לפי תקופה. עד שהלוגיקה קיימת - רק placeholder סטטי בהמשך. #}
+        {% if first_client_id %}
+        <a href="{{ url_for('periods.periods', client_id=first_client_id) }}" class="kpi-card kpi-meters">
+        {% else %}
+        <a href="{{ url_for('clients.clients') }}" class="kpi-card kpi-meters">
+        {% endif %}
+            <div class="kpi-icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c0 0-6.5 7.8-6.5 12a6.5 6.5 0 0 0 13 0C18.5 10.8 12 3 12 3Z"/></svg></div>
+            <div class="kpi-trend-badge kpi-trend-placeholder">—</div>
+            <div class="kpi-body">
+                <div class="kpi-number">{{ '{:,}'.format(total_meters) }}</div>
+                <div class="kpi-label">מונים בתקופות פעילות</div>
+            </div>
+            <div class="kpi-sparkline kpi-sparkline-placeholder"></div>
+        </a>
+
+        <!-- תיקי עבודה -->
+        {% if first_active_period_id %}
+        <a href="{{ url_for('folders.folders', period_id=first_active_period_id) }}" class="kpi-card kpi-folders">
+        {% else %}
+        <a href="{{ url_for('clients.clients') }}" class="kpi-card kpi-folders">
+        {% endif %}
+            <div class="kpi-icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19V8Z"/></svg></div>
+            {# TODO (משימת פיתוח): כמה תיקים נפתחו בשבוע האחרון. #}
+            <div class="kpi-trend-badge kpi-trend-placeholder">—</div>
+            <div class="kpi-body">
+                <div class="kpi-number">{{ total_open_folders }}</div>
+                <div class="kpi-label">תיקי עבודה פתוחים</div>
+            </div>
+        </a>
+
+        <!-- קוראים פעילים -->
+        <a href="{{ url_for('readers.readers') }}" class="kpi-card kpi-readers">
+            <div class="kpi-icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.2" r="3.4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></div>
+            {# TODO (משימת פיתוח): השוואת total_active_readers לעומת הקודמת. #}
+            <div class="kpi-trend-badge kpi-trend-placeholder">—</div>
+            <div class="kpi-body">
+                <div class="kpi-number">{{ total_active_readers }}</div>
+                <div class="kpi-label">קוראים פעילים</div>
+            </div>
+        </a>
+
+        <!-- קריאות שאושרו -->
+        <div class="kpi-card kpi-readings kpi-no-link">
+            <div class="kpi-icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg></div>
+            {# TODO (משימת פיתוח): מצב "תקין"/"דורש בדיקה" צריך להיגזר מכמות קריאות ממתינות לאישור. #}
+            <div class="kpi-trend-badge kpi-trend-placeholder">—</div>
+            <div class="kpi-body">
+                <div class="kpi-number">{{ total_approved_readings }}</div>
+                <div class="kpi-label">קריאות שאושרו</div>
+            </div>
+            {# TODO (משימת פיתוח): מסך/route לקריאות ממתינות לאישור עדיין לא קיים. הקישור למטה הוא placeholder בלבד - להחליף ל-url_for האמיתי כשהמסך יוקם. #}
+            <a href="#" class="kpi-pending-link">לבדיקת קריאות ממתינות ←</a>
+        </div>
+
+    </div>
+
+    <div class="dashboard-panels">
+
+        <div class="panel panel-chart">
+            <div class="panel-header">
+                <span>
+                <span class="panel-title">מגמת קריאות מונים</span>
+                {% if trend_labels %}
+                <span class="panel-meta">{{ trend_labels|length }} התקופות האחרונות</span>
+                {% endif %}
+                </span>
+                {# TODO (משימת פיתוח): מסך/route לתצוגה מלאה של המגמה עדיין לא קיים - href="#" הוא placeholder. #}
+                <a href="#" class="panel-link">לתצוגה מלאה ←</a>
+            </div>
+            {# דינמי לגמרי - טרם קיים ב-view:
+               trend_points: מחרוזת נקודות SVG "x,y x,y ..." לפי meters_trend (רשימת מספרים לתקופה)
+               trend_area_path: מחרוזת path לאזור המילוי מתחת לקו (אותם x, עם סגירה למטה)
+               trend_labels: רשימת תוויות לציר X, לדוגמה שמות התקופות האחרונות
+               כדאי לחשב את שתי המחרוזות בפייתון (view/helper) ולא ב-Jinja #}
+            {% if trend_labels %}
+            <svg viewBox="0 0 560 180" width="100%" height="180" preserveAspectRatio="none">
+                <defs>
+                    <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#0e7490" stop-opacity="0.28"/>
+                        <stop offset="100%" stop-color="#0e7490" stop-opacity="0"/>
+                    </linearGradient>
+                </defs>
+                <path d="{{ trend_area_path }}" fill="url(#trendGrad)"/>
+                <polyline points="{{ trend_points }}" fill="none" stroke="#0e7490" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div class="chart-axis">
+                {% for label in trend_labels %}<span>{{ label }}</span>{% endfor %}
+            </div>
+            {% else %}
+            <div class="chart-placeholder-box">בתהליך בנייה 🛠️ , מתוכנן להתחבר לאפליקציית הקריאה בשטח</div>
+            {% endif %}
+        </div>
+
+        <div class="panel panel-activity">
+            <div class="panel-header">
+                <span class="panel-title">פעילות אחרונה</span>
+            </div>
+            {# דינמי לגמרי - טרם קיים ב-view: recent_activity, רשימת אובייקטים עם .text ו-.time, מסודרת מהחדש לישן #}
+            <div class="activity-list">
+                {% for item in recent_activity %}
+                <div class="activity-item">
+                    <div class="activity-dot"></div>
+                    <div>
+                        <div class="activity-text">{{ item.text }}</div>
+                        <div class="activity-time">{{ item.time }}</div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="activity-item">
+                    <div class="activity-dot"></div>
+                    <div class="activity-text">בתהליך בנייה 🛠️, מתוכנן להתחבר לאפליקציית הקריאה בשטח</div>
+                </div>
+                <div class="activity-item">
+                    <div class="activity-dot activity-dot-muted"></div>
+                    <div class="activity-text activity-text-muted">אין פעילות נוספת להצגה</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

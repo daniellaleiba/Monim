@@ -1,0 +1,367 @@
+{% extends "layout.html" %}
+
+{% block title %}תקופות : {{ client.name }}{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('clients.clients') }}" class="back-link">← תאגידים</a>
+        <h1 class="page-title">{{ client.name }}</h1>
+        <p class="page-subtitle">ניהול תקופות קריאה</p>
+    </div>
+    <button class="btn btn-primary" onclick="openModal('modal-init')">
+        + אתחול תקופות לשנה
+    </button>
+</div>
+
+{% if not years %}
+<div class="table-wrapper">
+    <div class="empty-state">
+        <div class="empty-state-icon">📅</div>
+        <div class="empty-state-title">אין תקופות עדיין</div>
+        <div class="empty-state-text">לחץ על "אתחול תקופות לשנה" כדי ליצור את התקופות הראשונות</div>
+    </div>
+</div>
+
+{% else %}
+    {% for year in years %}
+    <div class="year-section">
+        <h2 class="year-title">שנת {{ year }}</h2>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>תקופה</th>
+                        <th>חודשים</th>
+                        <th>סטטוס תקופה</th>
+                        <th>קובץ</th>
+                        <th>מונים</th>
+                        <th>פעולות</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for period in by_year[year] %}
+                    <tr class="{% if period.status == 'skipped' %}row-skipped{% endif %}">
+
+                        <td><strong>תקופה {{ period.period_number }}</strong></td>
+
+                        <td style="color: var(--gray-600); font-size: 13px;">
+                            {{ period_months[period.period_number] }}
+                        </td>
+
+                        <td>
+                            <span class="badge badge-{{ period.status }}">
+                                {{ period_status_he[period.status] }}
+                            </span>
+                        </td>
+
+                        <td>
+                            {% if period.source_file %}
+                                <span class="badge badge-{{ period.source_file.processing_status }}">
+                                    {{ file_status_he[period.source_file.processing_status] }}
+                                </span>
+                                <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+                                   <span class="ltr-value" style="font-family: monospace; font-size: 12px; color: var(--gray-500);">
+                                        {{ period.source_file.original_filename }}
+                                    </span>
+                                    {% if period.status not in ('completed', 'skipped') %}
+                                    <button type="button" class="icon-btn"
+                                        data-period-id="{{ period.period_id }}"
+                                        onclick="openUploadModal(this)"
+                                        title="החלפת קובץ" aria-label="החלפת קובץ">
+                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                                {% if period.source_file.rows_count %}
+                                <div style="font-size: 11.5px; color: var(--gray-500); margin-top:2px;">
+                                    {{ period.source_file.rows_count }} שורות
+                                </div>
+                                {% endif %}
+                                {% if period.source_file.error_message and period.source_file.processing_status in ('error', 'partial') %}
+                                <div class="error-snippet" title="{{ period.source_file.error_message }}">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 2.7 18a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+                                    <span>{{ period.source_file.error_message[:80] }}{% if period.source_file.error_message|length > 80 %}…{% endif %}</span>
+                                </div>
+                                {% endif %}
+                            {% else %}
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <span style="color: var(--gray-400);">אין קובץ</span>
+                                    {% if period.status not in ('completed', 'skipped') %}
+                                    <button type="button" class="icon-btn"
+                                        data-period-id="{{ period.period_id }}"
+                                        onclick="openUploadModal(this)"
+                                        title="העלאת קובץ" aria-label="העלאת קובץ">
+                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if period.meter_count > 0 %}
+                                <strong style="color: var(--gray-700);">{{ period.meter_count }}</strong>
+                            {% else %}
+                                <span style="color: var(--gray-400);">—</span>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <div class="table-actions">
+
+                                {% if period.status == 'skipped' %}
+                                    <span style="color: var(--gray-400); font-size: 13px;">—</span>
+
+                                {% elif period.status in ('active', 'completed') %}
+                                    <a href="{{ url_for('meters.meters', period_id=period.period_id) }}"
+                                       class="icon-btn" title="מונים" aria-label="מונים">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="12" x2="16" y2="8.5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg>
+                                    </a>
+                                    <a href="{{ url_for('folders.folders', period_id=period.period_id) }}"
+                                       class="icon-btn" title="תיקים" aria-label="תיקים">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19V8Z"/></svg>
+                                    </a>
+                                {% else %}
+                                    {# pending / file_received — כפתור ההעלאה/החלפה עבר לעמודת "קובץ" #}
+
+                                    {# עיבוד - כשיש קובץ בסטטוס pending #}
+                                    {% if period.source_file and period.source_file.processing_status == 'pending' %}
+                                    <form method="POST"
+                                          action="{{ url_for('periods.process_file', client_id=client.client_id, source_file_id=period.source_file.source_file_id) }}"
+                                          style="display:inline"
+                                          class="process-file-form">
+                                        <button type="submit" class="icon-btn" title="עבד קובץ" aria-label="עבד קובץ">
+                                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+
+                                    {# ניסיון חוזר - כשיש קובץ בסטטוס error #}
+                                    {% if period.source_file and period.source_file.processing_status == 'error' %}
+                                    <form method="POST"
+                                          action="{{ url_for('periods.retry_file', client_id=client.client_id, source_file_id=period.source_file.source_file_id) }}"
+                                          style="display:inline">
+                                        <button type="submit" class="icon-btn" title="נסה שוב" aria-label="נסה שוב">
+                                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+
+                                    {# דלג - רק מסטטוס pending #}
+                                    {% if period.status == 'pending' %}
+                                    <form method="POST"
+                                          action="{{ url_for('periods.skip_period_route', client_id=client.client_id, period_id=period.period_id) }}"
+                                          style="display:inline"
+                                          onsubmit="return confirm('לדלג על תקופה {{ period.period_number }} ({{ period_months[period.period_number] }})?')">
+                                        <button type="submit" class="icon-btn" title="דלג" aria-label="דלג">
+                                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14l9-7-9-7Z"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+                                        </button>
+                                    </form>
+                                    {% endif %}
+
+                                {% endif %}
+
+                                {# כפתור עריכת סטטוס ידנית: תמיד מוצג, דיסקרטי #}
+                                <button class="btn-edit-status"
+                                    data-period-id="{{ period.period_id }}"
+                                    data-period-num="{{ period.period_number }}"
+                                    data-year="{{ period.year }}"
+                                    data-status="{{ period.status }}"
+                                    onclick="openEditStatusModal(this)"
+                                    title="עריכת סטטוס ידנית">
+                                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"
+                                         xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <path d="M11.5 1.5a2.121 2.121 0 0 1 3 3L5 14H2v-3L11.5 1.5z"
+                                              stroke="currentColor" stroke-width="1.5"
+                                              stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </button>
+
+                            </div>
+                        </td>
+
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+{% endif %}
+
+
+<!-- Modal: אתחול תקופות לשנה -->
+<div id="modal-init" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">אתחול תקופות לשנה</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" action="{{ url_for('periods.initialize_periods', client_id=client.client_id) }}">
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">שנה</label>
+                <select class="form-input" name="year">
+                    {% for y in available_years %}
+                    <option value="{{ y }}" {% if y == current_year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">התחל מתקופה</label>
+                <select class="form-input" name="start_from_period">
+                    {% for n in range(1, 7) %}
+                    <option value="{{ n }}">תקופה {{ n }} - {{ period_months[n] }}</option>
+                    {% endfor %}
+                </select>
+                <p class="form-hint">תקופות לפני הבחירה יסומנו אוטומטית כ"דולגות"</p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">צור תקופות</button>
+        </div>
+    </form>
+</div>
+
+
+<!-- Modal: העלאת קובץ -->
+<div id="modal-upload" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">העלאת קובץ לתקופה</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" id="upload-form" enctype="multipart/form-data">
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">קובץ *</label>
+                <input class="form-input" type="file" name="file" id="file-input" required style="padding: 6px;" onchange="autoDetectFileType(this)">
+            </div>
+            <div class="form-group">
+                <label class="form-label">פורמט קובץ *</label>
+                <select class="form-input" name="file_type" id="file-type-select" required>
+                    <option value="">--- בחר פורמט ---</option>
+                    <option value="netanya_format">פורמט נתניה - Excel (.xlsx)</option>
+                    <option value="netanya_d_format">פורמט נתניה - DOS קבוע (.D)</option>
+                    <option value="excel">Excel כללי</option>
+                    <option value="csv">CSV</option>
+                </select>
+                <p class="form-hint" id="file-type-hint" style="margin-top:5px; display:none;">
+                    ✅ פורמט זוהה אוטומטית - ניתן לשנות ידנית
+                </p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">העלה קובץ</button>
+        </div>
+    </form>
+</div>
+
+
+<!-- Modal: עריכת סטטוס תקופה -->
+<div id="modal-edit-status" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title" id="edit-status-modal-title">עריכת סטטוס תקופה</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" id="edit-status-form">
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">סטטוס נוכחי</label>
+                <div id="edit-status-current-badge" style="margin-top:4px;"></div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label">סטטוס חדש *</label>
+                <select class="form-input" name="status" id="edit-status-select" required>
+                    <option value="pending">ממתין</option>
+                    <option value="file_received">קובץ התקבל</option>
+                    <option value="active">פעיל</option>
+                    <option value="completed">הושלם</option>
+                    <option value="skipped">דולג</option>
+                </select>
+                <p class="form-hint" style="margin-top:6px;">
+                    ⚠️ שינוי ידני - אין ולידציה של מעברי סטטוס.
+                </p>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">שמור סטטוס</button>
+        </div>
+    </form>
+</div>
+
+
+<script>
+function openUploadModal(btn) {
+    const periodId = btn.dataset.periodId;
+    document.getElementById('upload-form').action =
+        '/periods/{{ client.client_id }}/upload/' + periodId;
+    openModal('modal-upload');
+}
+
+const STATUS_HE = {
+    'pending':       'ממתין',
+    'file_received': 'קובץ התקבל',
+    'active':        'פעיל',
+    'completed':     'הושלם',
+    'skipped':       'דולג',
+};
+
+function openEditStatusModal(btn) {
+    const periodId  = btn.dataset.periodId;
+    const periodNum = btn.dataset.periodNum;
+    const year      = btn.dataset.year;
+    const status    = btn.dataset.status;
+
+    document.getElementById('edit-status-form').action =
+        '/periods/{{ client.client_id }}/edit-status/' + periodId;
+    document.getElementById('edit-status-modal-title').textContent =
+        'עריכת סטטוס - תקופה ' + periodNum + ' / ' + year;
+
+    const badge = document.getElementById('edit-status-current-badge');
+    badge.innerHTML =
+        '<span class="badge badge-' + status + '">' + (STATUS_HE[status] || status) + '</span>';
+
+    document.getElementById('edit-status-select').value = status;
+    openModal('modal-edit-status');
+}
+
+
+// זיהוי אוטומטי של פורמט קובץ לפי סיומת
+function autoDetectFileType(input) {
+    if (!input.files || !input.files[0]) return;
+    const filename = input.files[0].name.toLowerCase();
+    const sel  = document.getElementById('file-type-select');
+    const hint = document.getElementById('file-type-hint');
+
+    let detected = '';
+    if (filename.endsWith('.d')) {
+        detected = 'netanya_d_format';
+    } else if (filename.endsWith('.xlsx') || filename.endsWith('.xls')) {
+        detected = 'netanya_format';
+    } else if (filename.endsWith('.csv')) {
+        detected = 'csv';
+    }
+
+    if (detected) {
+        sel.value = detected;
+        hint.style.display = 'block';
+    } else {
+        hint.style.display = 'none';
+    }
+}
+
+document.querySelectorAll('.process-file-form').forEach(function(form) {
+    form.addEventListener('submit', function() {
+        var btn = form.querySelector('button[type="submit"]');
+        if (!btn) return;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="btn-spinner"></span> מעבד...';
+    });
+});
+</script>
+
+{% endblock %}

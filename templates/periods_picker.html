@@ -1,0 +1,43 @@
+{% extends "layout.html" %}
+
+{% block title %}תקופות{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">תקופות</h1>
+        <p class="page-subtitle">בחר תאגיד לצפייה בתקופות הקריאה שלו</p>
+    </div>
+</div>
+
+{% if clients %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>שם תאגיד</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for client in clients %}
+            <tr class="meter-row"
+                onclick="location.href='{{ url_for('periods.periods', client_id=client.client_id) }}'">
+                <td><strong>{{ client.name }}</strong></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% else %}
+<div class="table-wrapper">
+    <div class="empty-state">
+        <div class="empty-state-icon">📅</div>
+        <div class="empty-state-title">אין תאגידים עדיין</div>
+        <div class="empty-state-text">יש להוסיף תאגיד קודם דרך מסך "תאגידים"</div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

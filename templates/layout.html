@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}מערכת מונים{% endblock %} | מוניטור</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="app-shell">
+<nav class="sidebar">
+    <div class="sidebar-brand">
+        <img src="{{ url_for('static', filename='images/logo.png') }}" 
+            alt="Monim Logo" 
+            class="brand-logo">
+        <span class="brand-name">מונים</span>
+    </div>
+    <div class="sidebar-nav">
+        <a href="{{ url_for('dashboard.dashboard') }}"
+           class="nav-link {% if request.endpoint == 'dashboard.dashboard' %}active{% endif %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+            <span>דשבורד</span>
+        </a>
+        <a href="{{ url_for('clients.clients') }}"
+           class="nav-link {% if request.endpoint in ('clients.clients', 'clients.create_client', 'clients.edit_client', 'clients.delete_client') %}active{% endif %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><rect x="8" y="7" width="3" height="3"/><rect x="13" y="7" width="3" height="3"/><rect x="8" y="12" width="3" height="3"/><rect x="13" y="12" width="3" height="3"/></svg>
+            <span>תאגידים</span>
+        </a>
+        <a href="{{ url_for('periods.choose_client') }}"
+            class="nav-link {% if request.endpoint in ('periods.periods', 'periods.choose_client', 'periods.initialize_periods', 'periods.upload_file', 'periods.process_file', 'periods.retry_file', 'periods.skip_period_route') %}active{% endif %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
+            <span>תקופות</span>
+        </a>
+        <a href="#"
+           class="nav-link {% if request.endpoint in ('meters.meters', 'meters.update_meter_status') %}active{% endif %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="12" x2="16" y2="8.5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg>
+            <span>מונים</span>
+        </a>
+        <a href="{{ url_for('folders.all_folders') }}"
+            class="nav-link {% if request.endpoint in ('folders.folders', 'folders.all_folders', 'folders.create_template', 'folders.edit_template', 'folders.delete_template', 'folders.create_folders', 'folders.distribute_meters') %}active{% endif %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19V8Z"/></svg>
+            <span>תיקים</span>
+        </a>
+        <a href="{{ url_for('readers.readers') }}"
+           class="nav-link {% if request.endpoint in ('readers.readers', 'readers.create_reader', 'readers.edit_reader', 'readers.toggle_reader_active', 'readers.assign_reader') %}active{% endif %}">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.6"/><path d="M14.5 20a5 5 0 0 1 6.5-4.7"/></svg>
+            <span>קוראים</span>
+        </a>
+        <a href="#" class="nav-link disabled">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><circle cx="15" cy="7" r="1.8" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="9" cy="12" r="1.8" fill="currentColor" stroke="none"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="13" cy="17" r="1.8" fill="currentColor" stroke="none"/></svg>
+            <span>בקרה</span>
+        </a>
+    </div>
+</nav>
+
+<main class="main-content">
+
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-container">
+                {% for category, message in messages %}
+                    <div class="flash flash-{{ category }}">
+                        <span>{{ message }}</span>
+                        <button class="flash-close" onclick="this.parentElement.remove()">✕</button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+
+</main>
+</div>
+
+<!-- Modal Container -->
+<div id="modal-overlay" class="modal-overlay" onclick="closeModal()" style="display:none"></div>
+
+
+<div id="page-loading-overlay" style="display:none; position:fixed; top:0px; left:0; right:0; bottom:0;
+     background:rgba(255,255,255,0.6); z-index:9999;
+     align-items:center; justify-content:center; flex-direction:column; gap:12px;">
+  <div class="loader"></div>
+  <span style="color:var(--gray-500); font-size:14px;">טוען מונים...</span>
+</div>
+
+<script>
+function openModal(id) {
+    document.getElementById('modal-overlay').style.display = 'block';
+    document.getElementById(id).style.display = 'flex';
+}
+function closeModal() {
+    document.getElementById('modal-overlay').style.display = 'none';
+    document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+document.addEventListener('click', function(e) {
+    const link = e.target.closest('a[href]');
+    if (link && link.href.includes('/meters/')) {
+        document.getElementById('page-loading-overlay').style.display = 'flex';
+    }
+});
+window.addEventListener('pageshow', function(e) {
+    if (e.persisted) {
+        document.getElementById('page-loading-overlay').style.display = 'none';
+    }
+});
+</script>
+
+</body>
+</html>

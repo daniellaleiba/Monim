@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables (passwords DB!)
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Flask
+instance/
+
+# Uploaded corporation files (contains real customer data)
+static/uploads/*
+!static/uploads/.gitkeep
+
+# Testing
+.pytest_cache/
+
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.bak
+*~
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Claude Code local settings
+.claude/

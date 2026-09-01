@@ -1,0 +1,77 @@
+{% extends "layout.html" %}
+
+{% block title %}כל התיקים{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">כל התיקים במערכת</h1>
+        <p class="page-subtitle">{{ folders|length }} תיקי עבודה{% if active_only %} (פעילים בלבד){% endif %}</p>
+    </div>
+    <div>
+        {% if active_only %}
+            <a href="{{ url_for('folders.all_folders') }}" class="btn btn-secondary btn-sm">הצג הכל</a>
+        {% else %}
+            <a href="{{ url_for('folders.all_folders', active_only=1) }}" class="btn btn-secondary btn-sm">פעילים בלבד</a>
+        {% endif %}
+    </div>
+</div>
+
+{% if folders %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>תאגיד</th>
+                <th>תקופה</th>
+                <th>שם תיק</th>
+                <th>קורא</th>
+                <th>סטטוס</th>
+                <th>התקדמות</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in folders %}
+            <tr class="meter-row"
+                onclick="location.href='{{ url_for('folders.folders', period_id=f.period_id) }}'">
+                <td>{{ f.client_name }}</td>
+                <td style="white-space:nowrap;">
+                    {{ f.period_number }}/{{ f.period_year }}
+                    <span style="color:var(--gray-500); font-size:12px;">
+                        ({{ period_months.get(f.period_number, '') }})
+                    </span>
+                </td>
+                <td><strong>{{ f.folder_name }}</strong></td>
+                <td style="color:var(--gray-500);">{{ f.reader_name or 'לא משויך' }}</td>
+                <td>
+                    <span class="badge badge-folder-{{ f.folder_status }}">
+                        {{ folder_status_he.get(f.folder_status, f.folder_status) }}
+                    </span>
+                </td>
+                <td>
+                    {% set pct = ((f.completed_meters / f.total_meters * 100) | int) if f.total_meters > 0 else 0 %}
+                    <div class="progress-wrap" style="min-width:120px;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width:{{ pct }}%"></div>
+                        </div>
+                        <span class="progress-label">{{ f.completed_meters }}/{{ f.total_meters }}</span>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% else %}
+<div class="table-wrapper">
+    <div class="empty-state">
+        <div class="empty-state-icon">📁</div>
+        <div class="empty-state-title">אין תיקי עבודה עדיין</div>
+        <div class="empty-state-text">תיקים ייווצרו לאחר חלוקת מונים בתוך תקופה קריאה</div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

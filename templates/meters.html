@@ -1,0 +1,454 @@
+{% extends "layout.html" %}
+
+{% block title %}מונים : {{ client.name }} תקופה {{ period.period_number }}/{{ period.year }}{% endblock %}
+
+{% block content %}
+
+<!-- כותרת עמוד -->
+<div class="page-header">
+    <div>
+        {% if folder_context %}
+        <a href="{{ url_for('folders.folders', period_id=period.period_id) }}" class="back-link">
+            ← תיקים
+        </a>
+        <h1 class="page-title">{{ folder_context.folder_name }}</h1>
+        <div class="page-period-range">
+            {{ client.name }} &middot; תקופה {{ period.period_number }}/{{ period.year }} &middot; {{ period_months[period.period_number] }}
+        </div>
+        {% if folder_context.reader_name %}
+        <div class="page-period-range" style="margin-top:4px;">
+            קורא: {{ folder_context.reader_name }}
+        </div>
+        {% endif %}
+        {% else %}
+        <a href="{{ url_for('periods.periods', client_id=client.client_id) }}" class="back-link">
+            ← {{ client.name }}
+        </a>
+        <h1 class="page-title">
+            תקופה {{ period.period_number }} / {{ period.year }}
+        </h1>
+        <div class="page-period-range">
+            {{ period_months[period.period_number] }}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- כרטיסי סיכום -->
+<div class="summary-cards">
+    <div class="summary-card card-all kpi-total active-filter" onclick="setFilter('all', this)">
+        <div class="card-number" id="cnt-all">{{ summary.total }}</div>
+        <div class="card-label">סה"כ מונים</div>
+    </div>
+
+    <div class="summary-chips">
+        <div class="summary-card card-new chip" onclick="setFilter('new', this)">
+            <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            <span class="card-label">חדשים</span>
+            <span class="card-number" id="cnt-new">{{ summary.new }}</span>
+        </div>
+        <div class="summary-card card-assigned_to_folder chip" onclick="setFilter('assigned_to_folder', this)">
+            <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h6l2 2h10v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19V8Z"/></svg>
+            <span class="card-label">שויך לתיק</span>
+            <span class="card-number" id="cnt-assigned_to_folder">{{ summary.assigned_to_folder }}</span>
+        </div>
+        <div class="summary-card card-assigned_to_reader chip" onclick="setFilter('assigned_to_reader', this)">
+            <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/></svg>
+            <span class="card-label">שויך לקורא</span>
+            <span class="card-number" id="cnt-assigned_to_reader">{{ summary.assigned_to_reader }}</span>
+        </div>
+        <div class="summary-card card-in_progress chip" onclick="setFilter('in_progress', this)">
+            <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            <span class="card-label">בביצוע</span>
+            <span class="card-number" id="cnt-in_progress">{{ summary.in_progress }}</span>
+        </div>
+        <div class="summary-card card-completed chip" onclick="setFilter('completed', this)">
+            <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12.5l5 5L20 6.5"/></svg>
+            <span class="card-label">הושלמו</span>
+            <span class="card-number" id="cnt-completed">{{ summary.completed }}</span>
+        </div>
+
+        <div class="chip-divider"></div>
+
+        <div class="summary-card card-exception chip" onclick="setFilter('exception', this)">
+            <span class="chip-dot"></span>
+            <span class="card-label">חריגים</span>
+            <span class="card-number" id="cnt-exception">{{ summary.exception }}</span>
+        </div>
+        <div class="summary-card card-missing_info chip" onclick="setFilter('missing_info', this)">
+            <span class="chip-dot"></span>
+            <span class="card-label">חסרי מידע</span>
+            <span class="card-number" id="cnt-missing_info">{{ summary.missing_info }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- חיפוש -->
+<div class="process-export-section">
+    <span class="process-export-label">עיבוד ויצוא</span>
+    <div class="process-export-actions">
+        <button id="btn-bulk-estimate" class="btn-process-orange" onclick="doBulkEstimate()">
+            הערכה כוללת
+        </button>
+        <button class="btn-process-blue" onclick="doSharedConsumption()">
+            🏢 צריכה משותפת
+        </button>
+    </div>
+</div>
+<div class="process-export-divider"></div>
+
+<div class="search-bar">
+    <input type="text" id="search-input" class="form-input search-input"
+           placeholder="חיפוש לפי מס' זיהוי, מס' מונה, מס' צרכן, או כתובת..."
+           oninput="onSearch(this.value)">
+    <span id="results-count" class="results-count"></span>
+</div>
+
+<!-- פילטרים -->
+<div style="display:flex; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+    <select id="filter-work-status" class="form-input" style="width:auto; min-width:160px;"
+            onchange="onFilterChange()">
+        <option value="">כל הסטטוסים</option>
+    </select>
+    <select id="filter-fault-code" class="form-input" style="width:auto; min-width:160px;"
+            onchange="onFaultCodeFilter(this.value)">
+        <option value="">כל קודי תקלה</option>
+    </select>
+</div>
+
+<!-- טבלת מונים -->
+<div class="table-wrapper" id="vs-viewport">
+    <table id="meters-table">
+        <thead>
+            <tr>
+                <th style="width:52px;text-align:center;">#</th>
+                <th>מס׳ זיהוי</th>
+                <th>מספר מונה</th>
+                <th>מספר צרכן</th>
+                <th style="width:110px;max-width:110px;">שם צרכן</th>
+                <th style="width:175px;min-width:175px;white-space:nowrap;">כתובת</th>
+                <th style="width:80px;">סדר הליכה</th>
+                <th>קריאה קודמת</th>
+                <th>תקלה אחרונה</th>
+                <th style="width:90px;">קריאה נוכחית</th>
+                <th style="width:70px;">צריכה</th>
+                <th>צריכה משותפת</th>
+                <th style="white-space:nowrap;">תוספת</th>
+                <th style="width:55px;">הערכה</th>
+                <th style="width:140px;max-width:140px;">תקלה</th>
+                <th style="width:90px;min-width:90px;">ת. קריאה</th>
+                <th style="width:60px;">שעה</th>
+                <th style="white-space:nowrap;">סטטוס</th>
+                <th>תיק</th>
+            </tr>
+        </thead>
+        <tbody id="vs-tbody">
+            <tr><td colspan="19" style="text-align:center; padding:40px; color:var(--gray-500);">טוען...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+
+<!-- Modal: פרטי מונה -->
+
+<div id="modal-meter" class="modal modal-xl" style="display:none">
+    <div class="modal-header" style="padding:12px 20px;">
+        <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                    <span class="modal-title" id="modal-meter-title" style="font-size:20px; font-weight:700;">פרטי מונה</span>
+                    <span id="modal-estimated-badge" style="display:none; align-items:center; gap:4px;
+                        background:#dbeafe; color:#1d4ed8; font-size:12px; font-weight:600;
+                        padding:3px 10px; border-radius:999px; width:fit-content;">
+                        ✅ בוצעה הערכה
+                    </span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="modal-status-badge" class="status-badge-lg badge-status-new">חדש</span>
+                    <button class="modal-close" onclick="toggleModalFullscreen()" id="btn-expand-modal" title="הרחב מסך">⛶</button>
+                    <button class="modal-close" onclick="closeMeterModal()">✕</button>
+                </div>
+            </div>
+            <div id="modal-meter-subtitle" style="font-size:13px; color:var(--gray-500); margin-top:3px; display:flex; align-items:center; gap:6px;">
+            </div>
+            <div id="mf-folder-header" style="font-size:12px; color:var(--gray-400); margin-top:3px; display:none;">
+                תיק: <span id="mf-folder-header-val" style="color:var(--gray-600); font-weight:500;"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="meter-modal-layout">
+        <!-- עמודה שמאל: תמונה -->
+        <div class="meter-photo-col">
+            <input type="file" id="meter-photo-input" accept="image/*" style="display:none"
+                onchange="previewMeterPhoto(this)">
+            <div class="meter-photo-placeholder" style="width:100%; flex:1; border-radius:0; border:none;" onclick="document.getElementById('meter-photo-input').click()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                </svg>
+                <span>תמונת מונה</span>
+                <span style="font-size:11px;">לחץ להעלאה</span>
+            </div>
+            <img id="meter-photo-preview" src="" alt="תמונת מונה"
+                style="display:none; width:100%; flex:1; height:100%; object-fit:contain; border-radius:0 0 12px 0; cursor:pointer;"
+                onclick="document.getElementById('meter-photo-input').click()"
+                title="לחץ להחלפת תמונה">
+            <!-- שדות חסרים -->
+            <div id="modal-missing-section" style="display:none; width:100%;">
+                <div class="missing-warning" style="font-size:12px;">
+                    <strong>⚠️ חסר:</strong>
+                    <span id="modal-missing-fields"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- עמודה ימין: מידע -->
+        <div class="meter-info-col">
+            <!-- פרטי לקוח -->
+            <div style="margin-bottom:10px; padding:10px 14px; background:#eff6ff;
+                border-radius:8px; border:1px solid #bfdbfe; display:flex; align-items:center; gap:10px;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.8" style="flex-shrink:0;">
+                    <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+                </svg>
+                <span id="mf-customer-card-name" style="font-size:15px; font-weight:700; color:var(--gray-900); white-space:nowrap;"></span>
+                <span style="color:var(--gray-300); margin:0 4px;">|</span>
+                <span id="mf-customer-card-address" style="font-size:13px; color:#64748b;"></span>
+                <span id="mf-customer-card-maps"></span>
+            </div>
+
+            <!-- פרטי מונה -->
+            <div class="meter-section">
+                <div class="meter-section-title">פרטי מונה</div>
+                <div style="border:1px solid var(--gray-200); border-radius:8px; padding:12px 14px; background:var(--gray-50);">
+                <div class="meter-inline-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+                    <div class="meter-inline-row">
+                        <span class="meter-inline-label">מס' זיהוי:</span>
+                        <span class="meter-inline-value" id="mf-meter-id">-</span>
+                    </div>
+                    <div class="meter-inline-row">
+                        <span class="meter-inline-label">מס' פיזי:</span>
+                        <span class="meter-inline-value" id="mf-physical">-</span>
+                    </div>
+                    <div class="meter-inline-row">
+                        <span class="meter-inline-label">מס' צרכן:</span>
+                        <span class="meter-inline-value" id="mf-customer-number">-</span>
+                    </div>
+                    <div class="meter-inline-row">
+                        <span class="meter-inline-label">סדר הליכה:</span>
+                        <span class="meter-inline-value" id="mf-walk-order">-</span>
+                    </div>
+                    <div class="meter-inline-row">
+                        <span class="meter-inline-label">מס' מונה:</span>
+                        <span class="meter-inline-value" id="mf-meter-number">-</span>
+                    </div>
+                    <div class="meter-inline-row">
+                        <span class="meter-inline-label">ת. התקנה:</span>
+                        <span class="meter-inline-value" id="mf-install-date">-</span>
+                    </div>
+                    <div class="meter-inline-row">
+                        <span class="meter-inline-label">מיקום מד:</span>
+                        <span class="meter-inline-value" id="mf-location">-</span>
+                    </div>
+                    <div class="meter-inline-row">
+                        <span class="meter-inline-label">מהות שימוש:</span>
+                        <span class="meter-inline-value" id="mf-usage-type">-</span>
+                    </div>
+                    <div class="meter-inline-row">
+                        <span class="meter-inline-label">ת. קליטה:</span>
+                        <span class="meter-inline-value" id="mf-reception-date">-</span>
+                    </div>
+                </div>
+                </div>
+            </div>
+
+            <!-- מצב עבודה -->
+            <div class="meter-section">
+
+                <!-- נתוני קריאה בשטח -->
+                <div style="margin-top:8px;">
+                    <div style="display:flex; align-items:center; gap:8px; padding:8px 0; font-size:12px; color:var(--gray-500); font-weight:600;">
+                        <span style="white-space:nowrap;">נתוני קריאה בשטח</span>
+                        <span style="flex:1; height:1px; background:var(--gray-200); display:block;"></span>
+                    </div>
+                    <div id="field-data-content" style="overflow-x:auto;">
+                        <table style="width:100%; border-collapse:collapse; font-size:12px; margin-top:4px;">
+                            <thead>
+                                <tr style="border-bottom:1px solid var(--gray-200); background:var(--gray-50);">
+                                    <th style="padding:6px 8px; font-weight:600; color:var(--gray-500); text-align:right; font-size:11px;">ת. קריאה</th>
+                                    <th style="padding:6px 8px; font-weight:600; color:var(--gray-500); text-align:right; font-size:11px;">ת. שידור</th>
+                                    <th style="padding:6px 8px; font-weight:600; color:var(--gray-500); text-align:right; font-size:11px;">שעה</th>
+                                    <th style="padding:6px 8px; font-weight:600; color:var(--gray-500); text-align:right; font-size:11px;">מסוף</th>
+                                    <th style="padding:6px 8px; font-weight:600; color:var(--gray-500); text-align:right; font-size:11px;">הערות</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td style="padding:4px 8px;">
+                                        <input type="date" id="mf-reading-date"
+                                               style="font-size:12px; padding:3px 5px; border:1px solid var(--gray-300);
+                                                      border-radius:5px; color:var(--gray-700); background:white;
+                                                      width:100px; direction:ltr;"
+                                               title="ת. קריאה">
+                                    </td>
+                                    <td style="padding:4px 8px;">
+                                        <input type="date" id="mf-transmission-date"
+                                               style="font-size:12px; padding:3px 5px; border:1px solid var(--gray-300);
+                                                      border-radius:5px; color:var(--gray-700); background:white;
+                                                      width:100px; direction:ltr;"
+                                               title="ת. שידור">
+                                    </td>
+                                    <td style="padding:4px 8px;">
+                                        <input type="time" id="mf-reading-time"
+                                            style="font-size:12px; padding:3px 5px; border:1px solid var(--gray-300);
+                                                    border-radius:5px; color:var(--gray-700); background:white;
+                                                    width:75px; direction:ltr;"
+                                            title="שעת קריאה">
+                                    </td>
+                                    <td style="padding:5px 8px; color:var(--gray-500);" id="mf-addon">-</td>
+                                    <td style="padding:5px 8px;">
+                                        <textarea id="mf-field-notes" rows="2"
+                                                style="width:100%; font-size:12px; padding:4px 6px;
+                                                        border:1px solid var(--gray-300); border-radius:5px;
+                                                        color:var(--gray-700); resize:vertical; min-width:120px;">
+                                        </textarea>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="meter-section-title">מצב עבודה</div>
+
+                <!-- כרטיסיית קריאות -->
+                <div style="display:flex; align-items:stretch; border-radius:8px; margin-bottom:14px; overflow:hidden; border:1px solid var(--gray-200);">
+                        <div style="width:4px; background:#2563eb; flex-shrink:0;"></div>
+                        <div style="display:flex; flex:1;">
+
+                            <!-- קריאה קודמת -->
+                            <div style="flex:1; text-align:center; padding:12px 8px; border-left:1px solid var(--gray-100);">
+                                <div style="font-size:10px; color:var(--gray-500); font-weight:600; margin-bottom:6px;">קריאה קודמת</div>
+                                <div style="font-size:18px; font-weight:600; color:var(--gray-700); font-variant-numeric:tabular-nums;"
+                                    id="mf-prev-reading">-</div>
+                            </div>
+
+                <!-- קריאה נוכחית — מודגשת -->
+                <div style="flex:1; text-align:center; padding:12px 8px; border-left:1px solid #bfdbfe; background:#eff6ff;">
+                    <div style="font-size:10px; color:#3b82f6; font-weight:600; margin-bottom:6px;">קריאה נוכחית</div>
+                    <input type="number" id="mf-curr-reading" step="0.001"
+                        style="font-size:22px; font-weight:700; color:#1d4ed8; font-variant-numeric:tabular-nums;
+                                border:none; background:transparent; text-align:center; width:100%;
+                                border-bottom:2px dashed #bfdbfe; outline:none;
+                                -webkit-appearance:none; -moz-appearance:textfield;"
+                        placeholder="-">
+                </div>
+
+                            <!-- צריכה -->
+                            <div style="flex:1; text-align:center; padding:12px 8px;">
+                                <div style="font-size:10px; color:var(--gray-500); font-weight:600; margin-bottom:6px;">צריכה</div>
+                                <div style="font-size:18px; font-weight:700; font-variant-numeric:tabular-nums;"
+                                    id="mf-diff-reading">-</div>
+                            </div>
+
+                        </div>
+                </div>
+
+                <!-- תוספת — מופיע רק בהערכת מונה עצור -->
+                <div id="mf-addon-row" style="display:none; margin-top:8px; padding:8px 12px;
+                 background:#fff7ed; border:1px solid #fed7aa; border-radius:8px;align-items:center; gap:10px;">
+                    <span style="font-size:13px; color:#c2410c; font-weight:600;">תוספת:</span>
+                    <span id="mf-addon-value" style="font-size:18px; font-weight:700; color:#c2410c;
+                        font-variant-numeric:tabular-nums;"></span>
+                </div>
+
+                <div class="meter-inline-grid" style="margin-bottom:10px;">
+                    <div style="display:flex; align-items:center; gap:10px; grid-column: 1 / -1; flex-wrap:nowrap;">
+                        <span class="meter-inline-label" style="white-space:nowrap;">סטטוס:</span>
+                        <input type="text" id="mf-fault-code-input"
+                               style="width:55px; font-size:13px; padding:3px 6px; border:1px solid var(--gray-300); border-radius:6px; color:var(--gray-900); text-align:center; flex-shrink:0;"
+                               placeholder="קוד"
+                               oninput="onFaultCodeInput(this.value)">
+                        <span class="meter-inline-label" style="white-space:nowrap;">תאור:</span>
+                        <select id="mf-fault-code-select"
+                                style="flex:1; font-size:13px; padding:3px 6px;
+                                       border:1px solid var(--gray-300); border-radius:6px;
+                                       color:var(--gray-900); background:white; direction:rtl;"
+                                onchange="onFaultDescSelect(this.value)">
+                            <option value="">- ללא תקלה -</option>
+                        </select>
+                    </div>
+                </div>
+
+            <!-- קריאות קודמות -->
+            <div class="meter-section">
+                <div class="meter-section-title">📊 קריאות קודמות</div>
+                <table class="hist-table">
+                    <thead>
+                        <tr>
+                            <th>תקופה</th>
+                            <th>קריאה</th>
+                            <th>צריכה</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modal-hist-tbody">
+                        <tr><td colspan="3" style="text-align:center;color:var(--gray-400);">אין נתונים</td></tr>
+                    </tbody>
+                </table>
+                <div style="margin-top:10px; text-align:left;">
+                    <button type="button" id="btn-estimate" onclick="doEstimate()"
+                            class="btn btn-secondary btn-sm">
+                         ביצוע הערכה
+                    </button>
+                </div>
+                </div>
+
+            <!-- הערות -->
+            <div id="modal-notes-section" style="display:none;">
+                <div class="meter-section-title">📝 הערות מנהל</div>
+                <div id="modal-notes" class="notes-box"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- סרגל פעולות -->
+    <div class="modal-status-bar">
+        <label class="form-label" style="margin:0; white-space:nowrap; font-size:13px;">שנה סטטוס:</label>
+        <select class="form-input" id="modal-status-select"
+                style="width:auto; min-width:160px; font-size:13px;">
+            {% for status, label in work_status_he.items() %}
+            {% if status != 'missing_info' %}
+            <option value="{{ status }}">{{ label }}</option>
+            {% endif %}
+            {% endfor %}
+        </select>
+        <button type="button" class="btn btn-primary" onclick="saveMeterChanges()">💾 שמירת שינויים</button>
+        <span id="save-success-msg" style="display:none; color:var(--success); font-size:13px; font-weight:500;">✓ המונה עודכן</span>
+        <div style="margin-right:auto; display:flex; gap:8px;">
+            <button type="button" id="btn-prev-meter" class="btn btn-secondary btn-sm" onclick="navigateMeter(-1)" title="מונה קודם" style="transition: opacity 0.15s;">→</button>
+            <button type="button" id="btn-next-meter" class="btn btn-secondary btn-sm" onclick="navigateMeter(1)" title="מונה הבא" style="transition: opacity 0.15s;">←</button>
+        </div>
+    </div>
+</div>
+
+
+<!-- סמן נסתר: האם מוצגים מונים בהקשר תיק ספציפי -->
+{% if folder_context %}<span id="js-folder-ctx" style="display:none"></span>{% endif %}
+
+<!-- נתוני המונים כ-JSON -->
+<script>
+const ALL_METERS        = {{ meters_json | tojson }};
+const STATUS_HE         = {{ work_status_he | tojson }};
+const FAULT_CODES       = {{ fault_codes | tojson }};
+const CLIENT_CITY       = {{ (client.city or '') | tojson }};
+const prefilterFolderId = {{ prefilter_folder_id | tojson }};
+window.PERIOD_ID           = {{ period.period_id }};
+window.PREFILTER_FOLDER_ID = prefilterFolderId;
+</script>
+<script src="{{ url_for('static', filename='js/meters.js') }}"></script>
+
+
+{% endblock %}

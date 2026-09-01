@@ -1,0 +1,399 @@
+{% extends "layout.html" %}
+
+{% block title %}ניהול קוראים{% endblock %}
+
+{% block content %}
+
+<!-- כותרת -->
+<div class="page-header">
+    <div>
+        <h1 class="page-title">ניהול קוראים</h1>
+        <p class="page-subtitle">ניהול קוראי שטח ושיוך לתיקי עבודה</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+        {% if active_only %}
+            <a href="{{ url_for('readers.readers') }}" class="btn btn-secondary btn-sm">הצג הכל</a>
+        {% else %}
+            <a href="{{ url_for('readers.readers', active_only=1) }}" class="btn btn-secondary btn-sm">פעילים בלבד</a>
+        {% endif %}
+        <button class="btn btn-primary btn-sm" onclick="openModal('modal-create-reader')">+ קורא חדש</button>
+    </div>
+</div>
+
+<!-- טבלת קוראים -->
+<div class="section-block">
+    <div class="section-header">
+        <div>
+            <h2 class="section-title">
+                קוראים
+                {% if active_only %}
+                    &nbsp;<span class="badge badge-success" style="font-size:11px; vertical-align:middle;">פעילים בלבד</span>
+                {% endif %}
+            </h2>
+            <p class="section-subtitle">{{ readers|length }} קוראים</p>
+        </div>
+    </div>
+
+    {% if readers %}
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>שם</th>
+                    <th>שם משתמש</th>
+                    <th>טלפון</th>
+                    <th>סטטוס</th>
+                    <th>תיקים משויכים</th>
+                    <th>פעולות</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in readers %}
+                {%- set r_folders = reader_folders_map.get(r.reader_id, []) %}
+
+                <!-- שורת קורא ראשית -->
+                <tr>
+                    <!-- לחיצה על תא השם פותחת/סוגרת accordion -->
+                    <td class="reader-name-cell" onclick="toggleExpand({{ r.reader_id }})">
+                        <span class="expand-arrow" id="arrow-{{ r.reader_id }}">▾</span>
+                        <strong>{{ r.name }}</strong>
+                    </td>
+                    <td class="ltr-value" style="font-family:monospace; color:var(--gray-500);">
+                        {{ r.username }}
+                    </td>
+                    <td class="ltr-value">{{ r.phone or '-' }}</td>
+                    <td>
+                        {% if r.active %}
+                            <span class="status-dot status-dot-active">פעיל</span>
+                        {% else %}
+                            <span class="status-dot status-dot-inactive">לא פעיל</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align:center;">
+                        <span style="font-weight:600; color:var(--gray-700);">{{ r.folder_count }}</span>
+                    </td>
+                    <td>
+                        <div class="table-actions">
+                            <!-- עריכה -->
+                            <button class="icon-btn"
+                                data-id="{{ r.reader_id }}"
+                                data-name="{{ r.name }}"
+                                data-username="{{ r.username }}"
+                                data-phone="{{ r.phone or '' }}"
+                                onclick="openEditReaderModal(this)"
+                                title="עריכה" aria-label="עריכה">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l.9-3.6L15.5 6 18 8.5 7.4 19 4 20Z"/><path d="M13.5 7.5l3 3"/></svg>
+                            </button>
+                            <!-- שיוך לתיק (רק לקורא פעיל, רק אם יש תיקים פתוחים) -->
+                            {% if r.active and assign_clients %}
+                            <button class="icon-btn"
+                                data-id="{{ r.reader_id }}"
+                                data-name="{{ r.name }}"
+                                onclick="openAssignModal(this)"
+                                title="שייך לתיק" aria-label="שייך לתיק">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19V8Z"/></svg>
+                            </button>
+                            {% endif %}
+                            <!-- הפעלה / השבתה -->
+                            <form method="POST"
+                                  action="{{ url_for('readers.toggle_reader_active', reader_id=r.reader_id) }}"
+                                  style="display:inline">
+                                <button type="submit"
+                                        class="btn-soft {{ 'btn-soft-danger' if r.active else 'btn-soft-primary' }}">
+                                    {{ 'השבת' if r.active else 'הפעל' }}
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+
+                <!-- שורת accordion - מוסתרת ונפתחת בלחיצה על השם -->
+                <tr id="expand-{{ r.reader_id }}" class="reader-expand-row" style="display:none;">
+                    <td colspan="6">
+                        <div class="reader-expand-panel">
+                            {% if r_folders %}
+                            <div class="expand-title">תיקים משויכים</div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>שם תיק</th>
+                                        <th>תאגיד</th>
+                                        <th>תקופה</th>
+                                        <th>טווח סדר הליכה</th>
+                                        <th>מונים</th>
+                                        <th>סטטוס</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for f in r_folders %}
+                                    <tr>
+                                        <td><strong>{{ f.folder_name }}</strong></td>
+                                        <td style="color:var(--gray-500);">{{ f.client_name }}</td>
+                                        <td style="white-space:nowrap;">
+                                            {{ f.period_number }}/{{ f.period_year }}
+                                        </td>
+                                        <td class="ltr-value" style="font-size:12px; color:var(--gray-500);">
+                                            {% if f.walk_order_start %}
+                                                {{ f.walk_order_start }} ...... {{ f.walk_order_end }}
+                                            {% else %}-{% endif %}
+                                        </td>
+                                        <td>
+                                            {% set pct = ((f.completed_meters / f.total_meters * 100) | int) if f.total_meters > 0 else 0 %}
+                                            <div class="progress-wrap" style="min-width:70px;">
+                                                <div class="progress-bar">
+                                                    <div class="progress-fill" style="width:{{ pct }}%"></div>
+                                                </div>
+                                                <span class="progress-label">{{ f.completed_meters }}/{{ f.total_meters }}</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-folder-{{ f.status }}">
+                                                {{ folder_status_he.get(f.status, f.status) }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            {% else %}
+                            <span class="reader-expand-empty">אין תיקים משויכים לקורא זה</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="table-wrapper">
+        <div class="empty-state">
+            <div class="empty-state-icon">👷</div>
+            <div class="empty-state-title">אין קוראים עדיין</div>
+            <div class="empty-state-text">לחץ על "קורא חדש" כדי להוסיף קורא שטח</div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+
+<!-- ============================================================
+     Modals
+     ============================================================ -->
+
+<!-- Modal: קורא חדש -->
+<div id="modal-create-reader" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">קורא חדש</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" action="{{ url_for('readers.create_reader') }}">
+        <div class="modal-body">
+            <div class="form-grid-2col">
+                <div class="form-group">
+                    <label class="form-label">שם מלא *</label>
+                    <input class="form-input" type="text" name="name" required
+                           placeholder="לדוגמה: ישראל ישראלי">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">שם משתמש *</label>
+                    <input class="form-input ltr-value" type="text" name="username" required placeholder="לדוגמה: israel1">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">סיסמה *</label>
+                    <input class="form-input" type="password" name="password" required
+                           placeholder="לפחות 6 תווים">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">טלפון</label>
+                    <input class="form-input ltr-value" type="tel" name="phone" placeholder="050-0000000">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">צור קורא</button>
+        </div>
+    </form>
+</div>
+
+
+<!-- Modal: עריכת קורא -->
+<div id="modal-edit-reader" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">עריכת קורא</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" id="edit-reader-form">
+        <div class="modal-body">
+            <div class="form-grid-2col">
+                <div class="form-group">
+                    <label class="form-label">שם מלא *</label>
+                    <input class="form-input" type="text" name="name"
+                           id="edit-reader-name" required>
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">שם משתמש *</label>
+                    <input class="form-input ltr-value" type="text" name="username" id="edit-reader-username" required>
+                </div>
+                <div class="form-group" style="margin:0; grid-column:1/-1">
+                    <label class="form-label">טלפון</label>
+                    <input class="form-input ltr-value" type="tel" name="phone"
+                    id="edit-reader-phone" placeholder="השאר ריק לניקוי הטלפון">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">שמור שינויים</button>
+        </div>
+    </form>
+</div>
+
+
+<!-- Modal: שיוך קורא לתיק -->
+<div id="modal-assign-reader" class="modal" style="display:none">
+    <div class="modal-header">
+        <div style="display:flex; align-items:center;">
+            <span class="modal-title">שיוך לתיק</span>
+            <span class="assign-reader-pill" id="assign-reader-name-label"></span>
+        </div>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" id="assign-reader-form">
+        <div class="modal-body">
+            <!-- שלב 1: תאגיד -->
+            <div class="form-group">
+                <div class="assign-step-label"><span class="assign-step-num active" id="step-num-1">1</span>תאגיד *</div>
+                <select class="form-input" id="assign-client-sel" onchange="onAssignClientChange()">
+                    <option value="">- בחר תאגיד -</option>
+                    {% for c in assign_clients %}
+                    <option value="{{ c.client_id }}">{{ c.client_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <!-- שלב 2: תקופה -->
+            <div class="form-group">
+                <div class="assign-step-label"><span class="assign-step-num" id="step-num-2">2</span>תקופה *</div>
+                <select class="form-input" id="assign-period-sel"
+                        onchange="onAssignPeriodChange()" disabled>
+                    <option value="">- בחר תאגיד קודם -</option>
+                </select>
+            </div>
+            <!-- שלב 3: תיק -->
+            <div class="form-group">
+                <div class="assign-step-label"><span class="assign-step-num" id="step-num-3">3</span>תיק עבודה *</div>
+                <select class="form-input" name="folder_id" id="assign-folder-sel"
+                        required disabled>
+                    <option value="">- בחר תקופה קודם -</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">שייך</button>
+        </div>
+    </form>
+</div>
+
+
+<script>
+// --- Accordion ---
+function toggleExpand(readerId) {
+    const row   = document.getElementById('expand-' + readerId);
+    const arrow = document.getElementById('arrow-' + readerId);
+    const isOpen = row.style.display !== 'none';
+    row.style.display = isOpen ? 'none' : '';
+    arrow.classList.toggle('open', !isOpen);
+}
+
+// נתוני שיוך - מגיעים מה-server
+const ASSIGN_PERIODS = {{ assign_periods | tojson }};
+const ASSIGN_FOLDERS = {{ assign_folders | tojson }};
+const PERIOD_MONTHS  = {{ period_months  | tojson }};
+
+// --- Edit Reader Modal ---
+function openEditReaderModal(btn) {
+    document.getElementById('edit-reader-form').action =
+        '/readers/' + btn.dataset.id + '/edit';
+    document.getElementById('edit-reader-name').value     = btn.dataset.name;
+    document.getElementById('edit-reader-username').value = btn.dataset.username;
+    document.getElementById('edit-reader-phone').value    = btn.dataset.phone;
+    openModal('modal-edit-reader');
+}
+
+// --- Assign Modal ---
+function openAssignModal(btn) {
+    document.getElementById('assign-reader-form').action =
+        '/readers/' + btn.dataset.id + '/assign';
+    document.getElementById('assign-reader-name-label').textContent = btn.dataset.name;
+    _resetAssignSelects();
+    openModal('modal-assign-reader');
+}
+
+function _resetAssignSelects() {
+    const ps = document.getElementById('assign-period-sel');
+    const fs = document.getElementById('assign-folder-sel');
+    document.getElementById('assign-client-sel').value = '';
+    ps.innerHTML = '<option value="">- בחר תאגיד קודם -</option>';
+    ps.disabled  = true;
+    fs.innerHTML = '<option value="">- בחר תקופה קודם -</option>';
+    fs.disabled  = true;
+    _setAssignStep(1);
+}
+
+function _setAssignStep(activeStep) {
+    [1, 2, 3].forEach(n => {
+        const el = document.getElementById('step-num-' + n);
+        el.classList.remove('active', 'done');
+        if (n < activeStep) el.classList.add('done');
+        else if (n === activeStep) el.classList.add('active');
+    });
+}
+
+function onAssignClientChange() {
+    const clientId = parseInt(document.getElementById('assign-client-sel').value) || 0;
+    const ps = document.getElementById('assign-period-sel');
+    const fs = document.getElementById('assign-folder-sel');
+
+    ps.innerHTML = '<option value="">- בחר תקופה -</option>';
+    fs.innerHTML = '<option value="">- בחר תקופה קודם -</option>';
+    fs.disabled  = true;
+
+    if (!clientId) { ps.disabled = true; _setAssignStep(1); return; }
+
+    // מסנן תקופות לתאגיד הנבחר (ייחודי לפי period_id)
+    const seen = new Set();
+    ASSIGN_PERIODS.forEach(p => {
+        if (p.client_id === clientId && !seen.has(p.period_id)) {
+            seen.add(p.period_id);
+            const months = PERIOD_MONTHS[String(p.period_number)] || '';
+            ps.appendChild(new Option(
+                'תקופה ' + p.period_number + '/' + p.period_year + ' - ' + months,
+                p.period_id
+            ));
+        }
+    });
+    ps.disabled = false;
+    _setAssignStep(2);
+}
+
+function onAssignPeriodChange() {
+    const periodId = parseInt(document.getElementById('assign-period-sel').value) || 0;
+    const fs = document.getElementById('assign-folder-sel');
+
+    fs.innerHTML = '<option value="">- בחר תיק -</option>';
+    if (!periodId) { fs.disabled = true; _setAssignStep(2); return; }
+
+    ASSIGN_FOLDERS.forEach(f => {
+        if (f.period_id === periodId) {
+            fs.appendChild(new Option(f.folder_name, f.folder_id));
+        }
+    });
+    fs.disabled = false;
+    _setAssignStep(3);
+}
+</script>
+
+{% endblock %}

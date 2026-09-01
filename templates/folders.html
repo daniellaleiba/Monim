@@ -1,0 +1,448 @@
+{% extends "layout.html" %}
+
+{% block title %}תיקים - {{ client.name }} תקופה {{ period.period_number }}/{{ period.year }}{% endblock %}
+
+{% block content %}
+
+<!-- כותרת -->
+<div class="page-header">
+    <div>
+        <a href="{{ url_for('periods.periods', client_id=client.client_id) }}" class="back-link">← תקופות</a>
+        <h1 class="page-title">
+            חלוקה לתיקים -
+            <span style="font-weight:400;">{{ client.name }}</span>
+        </h1>
+        <p class="page-subtitle">
+            תקופה {{ period.period_number }}/{{ period.year }} :
+            {{ period_months[period.period_number] }}
+        </p>
+    </div>
+</div>
+
+<!--  חלק עליון: תיקי עבודה לתקופה -->
+
+<div class="section-block">
+    <div class="section-header">
+        <div>
+            <h2 class="section-title">תיקי עבודה לתקופה</h2>
+            <p class="section-subtitle">
+                {% if total_meters > 0 %}
+                    {{ total_meters - unassigned }} מתוך {{ total_meters }} מונים שויכו לתיקים
+                    {% if unassigned > 0 %}
+                    , <span style="color:var(--danger);">{{ unassigned }} לא שויכו</span>
+                    {% endif %}
+                {% else %}
+                    אין מונים בתקופה זו
+                {% endif %}
+            </p>
+        </div>
+    </div>
+
+{% if work_folders %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th style="width:36px;"></th>
+                <th>מספר תיק</th>
+                <th>שם תיק</th>
+                <th>טווח סדר הליכה</th>
+                <th>קורא</th>
+                <th>התקדמות</th>
+                <th>סטטוס</th>
+                <th>כניסה</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in work_folders %}
+            {% set total = f.total_meters or 0 %}
+            {% set done  = f.completed_meters or 0 %}
+            {% set pct   = ((done / total * 100) | int) if total > 0 else 0 %}
+            <tr>
+                <td>
+                    <input type="radio" name="selected_folder" value="{{ f.folder_id }}"
+                           data-folder-name="{{ f.folder_name }}"
+                           onclick="onFolderRadioChange(this)">
+                </td>
+                <td><span class="badge badge-gray">{{ f.folder_number or '—' }}</span></td>
+                <td><strong>{{ f.folder_name }}</strong></td>
+                <td style="font-size:13px; color:var(--gray-500);">
+                    {% if f.walk_order_start %}
+                        {{ f.walk_order_start }} - {{ f.walk_order_end }}
+                    {% else %}-{% endif %}
+                </td>
+                <td style="font-size:13px; color:var(--gray-500);">
+                    {% if f.reader_name %}{{ f.reader_name }}{% else %}לא משויך{% endif %}
+                </td>
+                <td style="min-width:160px;">
+                    <div class="progress-wrap">
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width:{{ pct }}%"></div>
+                        </div>
+                        <span class="progress-label">{{ done }}/{{ total }}</span>
+                    </div>
+                </td>
+                <td>
+                    <span class="badge badge-folder-{{ f.status }}">
+                        {{ folder_status_he.get(f.status, f.status) }}
+                    </span>
+                </td>
+                <td>
+                    <a href="{{ url_for('meters.meters', period_id=period.period_id, folder_id=f.folder_id) }}"
+                       class="btn-enter-folder">
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="12" x2="16" y2="8.5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg>
+                        <span>מונים ({{ total }})</span>
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="table-wrapper">
+    <div class="empty-state">
+        <div class="empty-state-icon">📂</div>
+        <div class="empty-state-title">אין תיקי עבודה עדיין</div>
+        <div class="empty-state-text">לחץ על "צור תיקים לתקופה" כדי ליצור תיקים מהתבניות</div>
+    </div>
+</div>
+{% endif %}
+
+<div style="display:flex; gap:8px; margin-top:20px;">
+    <form method="POST"
+          action="{{ url_for('folders.create_folders', period_id=period.period_id) }}"
+          style="display:inline"
+          data-has-folders="{{ 'true' if work_folders else 'false' }}"
+          onsubmit="return confirmCreateFolders(this)">
+        <button type="submit" class="btn btn-primary"
+                {% if not templates %}disabled title="צור תבניות קודם"{% endif %}>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+            צור תיקים לתקופה
+        </button>
+    </form>
+    {% if work_folders %}
+        <button class="btn btn-secondary" onclick="openModal('modal-assign-reader')">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M18 8v5"/><path d="M15.5 10.5h5"/></svg>
+            שייך קורא לתיק
+        </button>
+        <button id="btn-delete-folder" class="btn-soft-danger-outline" disabled
+                onclick="openDeleteFolderModal()">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M7 7l1 12a1.5 1.5 0 0 0 1.5 1.4h5a1.5 1.5 0 0 0 1.5-1.4L17 7"/></svg>
+            מחק תיק
+        </button>
+    {% endif %}
+</div>
+
+
+<!-- Modals -->
+
+<!-- Modal: מחיקת תיק עבודה -->
+<div id="modal-delete-folder" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">מחיקת תיק עבודה</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" id="delete-folder-form">
+        <input type="hidden" name="period_id" value="{{ period.period_id }}">
+        <div class="modal-body">
+            <p class="confirm-text">
+                למחוק את התיק <strong id="delete-folder-name"></strong>?
+                כל המונים בתיק ישוחררו ויחזרו לסטטוס לא משויך.
+            </p>
+            <div class="confirm-warning">
+                ⚠️ פעולה זו אינה ניתנת לביטול.
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-danger">מחק</button>
+        </div>
+    </form>
+</div>
+
+<!-- Modal: שיוך קורא לתיק -->
+<div id="modal-assign-reader" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">שייך קורא לתיק</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" action="{{ url_for('folders.assign_reader_to_folder', period_id=period.period_id) }}">
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">תיק עבודה *</label>
+                <select class="form-input" name="folder_id" required
+                        id="assign-folder-select" onchange="onFolderSelectChange(this)">
+                    <option value="" data-reader-name=""> בחר תיק </option>
+                    {% for f in work_folders %}
+                    <option value="{{ f.folder_id }}" data-reader-name="{{ f.reader_name or '' }}">
+                        {{ f.folder_name }}{% if f.folder_number %} ({{ f.folder_number }}){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                <div id="assign-reader-warning" style="display:none; margin-top:8px; padding:10px 12px;
+                     background:#fffbeb; border:1px solid #f59e0b; border-radius:6px;
+                     font-size:14px; color:#92400e;"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">קורא *</label>
+                <select class="form-input" name="reader_id" required>
+                    <option value=""> בחר קורא </option>
+                    {% for r in readers %}
+                    <option value="{{ r.reader_id }}">{{ r.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">שייך</button>
+        </div>
+    </form>
+</div>
+
+<!-- Modal: תבנית חדשה -->
+<div id="modal-create-template" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">תבנית חדשה</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" action="{{ url_for('folders.create_template', period_id=period.period_id) }}">
+        <div class="modal-body">
+            <div class="form-grid-2col">
+                <div class="form-group">
+                    <label class="form-label">מספר תיק *</label>
+                    <input class="form-input" type="number" name="folder_number" min="1" required
+                           placeholder="לדוגמה: 1">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">שם תיק</label>
+                    <input class="form-input" type="text" name="folder_name"
+                           placeholder="לדוגמה: אזור צפון (אופציונלי)">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">סדר הליכה מ- *</label>
+                    <input class="form-input" type="number" name="walk_order_start" min="1" required
+                           placeholder="לדוגמה: 1000" style="direction:ltr">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">סדר הליכה עד *</label>
+                    <input class="form-input" type="number" name="walk_order_end" min="1" required
+                           placeholder="לדוגמה: 1999" style="direction:ltr">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">צור תבנית</button>
+        </div>
+    </form>
+</div>
+
+<!-- Modal: עריכת תבנית -->
+<div id="modal-edit-template" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">עריכת תבנית</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" id="edit-template-form">
+        <input type="hidden" name="period_id" value="{{ period.period_id }}">
+        <div class="modal-body">
+            <div class="form-grid-2col">
+                <div class="form-group">
+                    <label class="form-label">מספר תיק</label>
+                    <input class="form-input" type="number" name="folder_number" min="1"
+                           id="edit-folder-number" style="direction:ltr">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">שם תיק</label>
+                    <input class="form-input" type="text" name="folder_name"
+                           id="edit-folder-name">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">סדר הליכה מ-</label>
+                    <input class="form-input" type="number" name="walk_order_start" min="1"
+                           id="edit-walk-start" style="direction:ltr">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">סדר הליכה עד</label>
+                    <input class="form-input" type="number" name="walk_order_end" min="1"
+                           id="edit-walk-end" style="direction:ltr">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary">שמור שינויים</button>
+        </div>
+    </form>
+</div>
+
+<!-- Modal: אישור מחיקת תבנית -->
+<div id="modal-delete-template" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">מחיקת תבנית</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" id="delete-template-form">
+        <input type="hidden" name="period_id" value="{{ period.period_id }}">
+        <div class="modal-body">
+            <p class="confirm-text">
+                למחוק את התבנית <strong id="delete-template-name"></strong>?
+            </p>
+            <div class="confirm-warning">
+                ⚠️ מחיקה תהיה אפשרית רק אם אין תיקי עבודה פעילים מתבנית זו.
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-danger">מחק תבנית</button>
+        </div>
+    </form>
+</div>
+
+<!--  חלק תחתון: תבניות תיקים -->
+
+<div class="section-block">
+    <div class="section-header">
+        <div>
+            <h2 class="section-title">תבניות תיקים</h2>
+            <p class="section-subtitle">הגדרת אופן חלוקת העבודה לפי טווחי סדר הליכה</p>
+        </div>
+    </div>
+
+    {% if templates %}
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>מספר תיק</th>
+                    <th>שם תיק</th>
+                    <th>סדר הליכה מ-</th>
+                    <th>סדר הליכה עד</th>
+                    <th>פעולות</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in templates %}
+                <tr>
+                    <td><span class="badge badge-gray">{{ t.folder_number }}</span></td>
+                    <td><strong>{{ t.folder_name }}</strong></td>
+                    <td style="direction:ltr; text-align:right;">{{ t.walk_order_start }}</td>
+                    <td style="direction:ltr; text-align:right;">{{ t.walk_order_end }}</td>
+                    <td>
+                        <div class="table-actions">
+                            <button class="icon-btn" title="עריכה" aria-label="עריכה"
+                                data-id="{{ t.template_id }}"
+                                data-number="{{ t.folder_number }}"
+                                data-name="{{ t.folder_name }}"
+                                data-start="{{ t.walk_order_start }}"
+                                data-end="{{ t.walk_order_end }}"
+                                onclick="openEditTemplateModal(this)">
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l.9-3.6L15.5 6 18 8.5 7.4 19 4 20Z"/><path d="M13.5 7.5l3 3"/></svg>
+                            </button>
+                            <button class="icon-btn icon-btn-danger" title="מחיקה" aria-label="מחיקה"
+                                data-id="{{ t.template_id }}"
+                                data-name="{{ t.folder_name }}"
+                                onclick="openDeleteTemplateModal(this)">
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M7 7l1 12a1.5 1.5 0 0 0 1.5 1.4h5a1.5 1.5 0 0 0 1.5-1.4L17 7"/></svg>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="openModal('modal-create-template')">
+            + תבנית חדשה
+        </button>
+    </div>
+    {% else %}
+    <div class="table-wrapper">
+        <div class="empty-state">
+            <div class="empty-state-icon">📋</div>
+            <div class="empty-state-title">אין תבניות עדיין</div>
+            <div class="empty-state-text">צור תבנית כדי להגדיר כיצד המונים יחולקו לתיקים</div>
+        </div>
+    </div>
+    <div style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="openModal('modal-create-template')">
+            + תבנית חדשה
+        </button>
+    </div>
+    {% endif %}
+</div>
+
+
+
+<script>
+var _selectedFolderId   = null;
+var _selectedFolderName = null;
+var _lastSelectedFolder = null;
+
+function onFolderRadioChange(radio) {
+    var btn = document.getElementById('btn-delete-folder');
+    if (radio.value === _lastSelectedFolder) {
+        radio.checked       = false;
+        _lastSelectedFolder = null;
+        _selectedFolderId   = null;
+        _selectedFolderName = null;
+        if (btn) btn.disabled = true;
+    } else {
+        _lastSelectedFolder = radio.value;
+        _selectedFolderId   = radio.value;
+        _selectedFolderName = radio.dataset.folderName;
+        if (btn) btn.disabled = false;
+    }
+}
+
+function confirmCreateFolders(form) {
+    if (form.dataset.hasFolders === 'true') {
+        return confirm('תיקים כבר קיימים. לצור נוספים?');
+    }
+    return true;
+}
+
+function openDeleteFolderModal() {
+    if (!_selectedFolderId) return;
+    document.getElementById('delete-folder-form').action =
+        '/folders/folder/' + _selectedFolderId + '/delete';
+    document.getElementById('delete-folder-name').textContent = _selectedFolderName;
+    openModal('modal-delete-folder');
+}
+
+function onFolderSelectChange(sel) {
+    const readerName = sel.options[sel.selectedIndex].dataset.readerName;
+    const warning    = document.getElementById('assign-reader-warning');
+    if (readerName) {
+        warning.textContent = '⚠️ תיק זה כבר משויך לקורא: ' + readerName + '. השיוך החדש יחליף את הקורא הנוכחי.';
+        warning.style.display = 'block';
+    } else {
+        warning.style.display = 'none';
+    }
+}
+
+function openEditTemplateModal(btn) {
+    document.getElementById('edit-template-form').action =
+        '/folders/template/' + btn.dataset.id + '/edit';
+    document.getElementById('edit-folder-number').value = btn.dataset.number;
+    document.getElementById('edit-folder-name').value   = btn.dataset.name;
+    document.getElementById('edit-walk-start').value    = btn.dataset.start;
+    document.getElementById('edit-walk-end').value      = btn.dataset.end;
+    openModal('modal-edit-template');
+}
+
+function openDeleteTemplateModal(btn) {
+    document.getElementById('delete-template-form').action =
+        '/folders/template/' + btn.dataset.id + '/delete';
+    document.getElementById('delete-template-name').textContent = btn.dataset.name;
+    openModal('modal-delete-template');
+}
+</script>
+
+
+
+{% endblock %}
