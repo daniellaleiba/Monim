@@ -148,6 +148,12 @@ CREATE TABLE work_folders (
     completed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
+    -- Release to the reader's mobile app (only the last release is kept)
+    released_at TIMESTAMP,                                  -- When the manager last released it
+    include_previous_readings BOOLEAN NOT NULL DEFAULT TRUE, -- Send previous readings to the app
+    downloaded_at TIMESTAMP,                                -- When the app downloaded it, since the last release
+
+
     UNIQUE(period_id, template_id),
     UNIQUE (folder_id, period_id)
 );

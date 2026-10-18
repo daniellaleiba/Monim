@@ -29,6 +29,7 @@ class WorkFolderService:
         - Track folder progress (total/completed meters)
         - Manage folder lifecycle (pending → assigned → in_progress → completed)
         - WorkFolder is execution; FolderTemplate is configuration.
+        - Release folders to readers' mobile app and track their download
     """
  
     def __init__(self):
@@ -349,6 +350,62 @@ class WorkFolderService:
             )
  
         return self.repo.mark_completed(folder_id)
+
+        # --- RELEASE TO READER (mobile app):
+
+    def release_folder(self, folder_id: int, include_previous_readings: bool) -> bool:
+        """
+        Release a folder to its reader's mobile app, so it appears in the next download.
+        Allowed only for a folder with a reader, in 'assigned', 'in_progress' or 'completed'.
+        A completed folder goes back to 'assigned': it is sent again, and the download will move it to 'in_progress'. Re-releasing an in_progress folder keeps its status.
+
+        Returns: True if released
+        Raises: ValueError if folder not found, has no reader, or status not allowed
+        """
+        folder = self._ensure_folder_exists(folder_id)
+
+        if not folder.get('assigned_to'):
+            raise ValueError("לא ניתן לשחרר תיק שלא משויך לקורא")
+
+        if folder['status'] not in ('assigned', 'in_progress', 'completed'):
+            raise ValueError(
+                f"לא ניתן לשחרר תיק בסטטוס '{folder['status']}'"
+            )
+
+        if folder['status'] == 'completed':
+            self.repo.update_status(folder_id, 'assigned')
+
+        return self.repo.release(folder_id, include_previous_readings)
+
+    def get_folders_ready_for_download(self, reader_id: int) -> List[dict]:
+        """
+        Folders released to a reader and not downloaded since the last release.
+        Used by the mobile app's download endpoint.
+
+        Raises: ValueError if reader not found
+        """
+        self._ensure_reader_exists(reader_id)
+        return self.repo.list_ready_for_download(reader_id)
+
+    def mark_folder_downloaded(self, folder_id: int) -> bool:
+        """
+        Record that the reader's app downloaded the folder; it is not sent again
+        until the next release. An 'assigned' folder moves to 'in_progress': the reader has started working on it.
+
+        Returns: True if marked
+        Raises: ValueError if folder not found or was never released
+        """
+        folder = self._ensure_folder_exists(folder_id)
+
+        if not folder.get('released_at'):
+            raise ValueError(f"תיק {folder_id} לא שוחרר לקורא")
+
+        result = self.repo.mark_downloaded(folder_id)
+
+        if folder['status'] == 'assigned':
+            self.start_folder_work(folder_id)
+
+        return result
     
     # --- DELETE:
  

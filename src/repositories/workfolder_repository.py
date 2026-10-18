@@ -14,7 +14,7 @@ class WorkFolderRepository:
     """
     Data Access Layer for work_folders table.
  
-    WorkFolder is an EXECUTION entity — actual work folders created
+    WorkFolder is an EXECUTION entity - actual work folders created
     for a specific period, based on FolderTemplates.
  
     Responsibilities:
@@ -23,6 +23,7 @@ class WorkFolderRepository:
         - reader assignment
         - status updates
         - meter count tracking (cached/summary fields)
+        - release to the reader's mobile app (release, mark downloaded, list ready)
  
     Note: WorkFolder does NOT contain meters directly.
           Meters reference a folder via period_meters.folder_id.
@@ -142,13 +143,16 @@ class WorkFolderRepository:
     def clear_reader_assignment(self, folder_id: int) -> bool:
         """
         Remove reader assignment from a folder.
-        Sets assigned_to to NULL and clears assigned_at.
+        Clears assigned_to / assigned_at, and the release fields:
+        a folder with no reader is not released to anyone.
  
         Returns: True if updated
         """
         rows = self.db.execute_query("""
             UPDATE work_folders
-            SET assigned_to = NULL, assigned_at = NULL
+            SET assigned_to = NULL, assigned_at = NULL,
+                released_at = NULL, downloaded_at = NULL,
+                include_previous_readings = TRUE
             WHERE folder_id = %s
         """, (folder_id,), commit=True)
         return rows > 0
@@ -167,6 +171,55 @@ class WorkFolderRepository:
             "UPDATE work_folders SET status = %s WHERE folder_id = %s",
             (status, folder_id), commit=True)
         return rows > 0
+
+        # --- RELEASE TO READER (mobile app):
+
+    def release(self, folder_id: int, include_previous_readings: bool) -> bool:
+        """
+        Release the folder to its reader's app.
+        Stamps released_at and stores the previous-readings choice.
+        Clears downloaded_at, so the folder appears in the next download
+        (also on a re-release), and completed_at, for a completed folder
+        that is sent again (it is NULL anyway for any other status).
+
+        Returns: True if updated
+        """
+        rows = self.db.execute_query("""
+            UPDATE work_folders
+            SET released_at = CURRENT_TIMESTAMP,
+                include_previous_readings = %s,
+                downloaded_at = NULL,
+                completed_at = NULL
+            WHERE folder_id = %s
+        """, (include_previous_readings, folder_id), commit=True)
+        return rows > 0
+
+    def mark_downloaded(self, folder_id: int) -> bool:
+        """
+        Record that the reader's app downloaded the folder.
+        It is not returned again until the next release.
+
+        Returns: True if updated
+        """
+        rows = self.db.execute_query("""
+            UPDATE work_folders
+            SET downloaded_at = CURRENT_TIMESTAMP
+            WHERE folder_id = %s
+        """, (folder_id,), commit=True)
+        return rows > 0
+
+    def list_ready_for_download(self, reader_id: int) -> List[dict]:
+        """
+        Folders released to a reader and not downloaded since the last release.
+        Uses index: idx_work_folders_reader
+        """
+        return self.db.execute_query("""
+            SELECT * FROM work_folders
+            WHERE assigned_to = %s
+              AND released_at IS NOT NULL
+              AND downloaded_at IS NULL
+            ORDER BY released_at
+        """, (reader_id,), fetch="all")
  
     def mark_completed(self, folder_id: int) -> bool:
         """
