@@ -62,6 +62,10 @@
                 <td>
                     <input type="radio" name="selected_folder" value="{{ f.folder_id }}"
                            data-folder-name="{{ f.folder_name }}"
+                           data-has-reader="{{ 'true' if f.assigned_to else 'false' }}"
+                           data-reader-name="{{ f.reader_name or 'קורא לא פעיל' }}"
+                           data-released-at="{{ f.released_at.strftime('%d/%m/%Y %H:%M') if f.released_at else '' }}"
+                           data-downloaded-at="{{ f.downloaded_at.strftime('%d/%m/%Y %H:%M') if f.downloaded_at else '' }}"
                            onclick="onFolderRadioChange(this)">
                 </td>
                 <td><span class="badge badge-gray">{{ f.folder_number or '—' }}</span></td>
@@ -86,6 +90,11 @@
                     <span class="badge badge-folder-{{ f.status }}">
                         {{ folder_status_he.get(f.status, f.status) }}
                     </span>
+                    {% if f.downloaded_at %}
+                    <div class="folder-release-info">הורד לאפליקציה · {{ f.downloaded_at.strftime('%d/%m/%Y %H:%M') }}</div>
+                    {% elif f.released_at %}
+                    <div class="folder-release-info">ממתין להורדה · {{ f.released_at.strftime('%d/%m/%Y %H:%M') }}</div>
+                    {% endif %}
                 </td>
                 <td>
                     <a href="{{ url_for('meters.meters', period_id=period.period_id, folder_id=f.folder_id) }}"
@@ -126,6 +135,13 @@
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M18 8v5"/><path d="M15.5 10.5h5"/></svg>
             שייך קורא לתיק
         </button>
+        <span id="btn-release-folder-wrap" style="display:inline-block;">
+        <button id="btn-release-folder" class="btn-soft-primary-outline" disabled
+                onclick="openReleaseFolderModal()">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M12 7v7"/><path d="M9.5 11.5L12 14l2.5-2.5"/><line x1="11" y1="18.5" x2="13" y2="18.5"/></svg>
+            שחרר לקורא
+        </button>
+        </span>
         <button id="btn-delete-folder" class="btn-soft-danger-outline" disabled
                 onclick="openDeleteFolderModal()">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M7 7l1 12a1.5 1.5 0 0 0 1.5 1.4h5a1.5 1.5 0 0 0 1.5-1.4L17 7"/></svg>
@@ -157,6 +173,33 @@
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
             <button type="submit" class="btn btn-danger">מחק</button>
+        </div>
+    </form>
+</div>
+
+<!-- Modal: שחרור תיק לקורא -->
+<div id="modal-release-folder" class="modal" style="display:none">
+    <div class="modal-header">
+        <span class="modal-title">שחרור תיק לקורא</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form method="POST" action="{{ url_for('folders.release_folder', period_id=period.period_id) }}">
+        <input type="hidden" name="folder_id" id="release-folder-id">
+        <div class="modal-body">
+            <p class="confirm-text">
+                לשחרר את התיק <strong id="release-folder-name"></strong>
+                לקורא <strong id="release-reader-name"></strong>?
+                התיק יישלח לאפליקציה בהורדה הבאה של הקורא.
+            </p>
+            <label style="display:flex; align-items:center; gap:8px; margin-top:12px; font-size:14px; cursor:pointer;">
+                <input type="checkbox" name="include_previous_readings" id="release-include-previous" checked>
+                כולל קריאה קודמת
+            </label>
+            <div id="release-folder-state" class="folder-release-info" style="display:none; margin-top:12px;"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">ביטול</button>
+            <button type="submit" class="btn btn-primary" id="release-folder-submit">שחרר</button>
         </div>
     </form>
 </div>
@@ -382,21 +425,56 @@
 var _selectedFolderId   = null;
 var _selectedFolderName = null;
 var _lastSelectedFolder = null;
+var _selectedFolderRadio = null;
 
 function onFolderRadioChange(radio) {
     var btn = document.getElementById('btn-delete-folder');
+    var releaseBtn = document.getElementById('btn-release-folder');
+    var releaseWrap = document.getElementById('btn-release-folder-wrap');
     if (radio.value === _lastSelectedFolder) {
         radio.checked       = false;
         _lastSelectedFolder = null;
         _selectedFolderId   = null;
         _selectedFolderName = null;
         if (btn) btn.disabled = true;
+        _selectedFolderRadio = null;
+        if (releaseBtn) { releaseBtn.disabled = true; releaseWrap.title = ''; }
     } else {
         _lastSelectedFolder = radio.value;
         _selectedFolderId   = radio.value;
         _selectedFolderName = radio.dataset.folderName;
         if (btn) btn.disabled = false;
+        _selectedFolderRadio = radio;
+        if (releaseBtn) {
+            var hasReader = radio.dataset.hasReader === 'true';
+            releaseBtn.disabled = !hasReader;
+            releaseWrap.title = hasReader ? '' : 'יש לשייך קורא לתיק קודם';
+        }
     }
+}
+
+function openReleaseFolderModal() {
+    var radio = _selectedFolderRadio;
+    if (!radio || radio.dataset.hasReader !== 'true') return;
+    var releasedAt   = radio.dataset.releasedAt;
+    var downloadedAt = radio.dataset.downloadedAt;
+    var state        = document.getElementById('release-folder-state');
+
+    document.getElementById('release-folder-id').value             = radio.value;
+    document.getElementById('release-folder-name').textContent     = radio.dataset.folderName;
+    document.getElementById('release-reader-name').textContent     = radio.dataset.readerName;
+    document.getElementById('release-include-previous').checked    = true;
+
+    if (releasedAt) {
+        state.textContent = 'שוחרר לאחרונה: ' + releasedAt + ' · ' +
+            (downloadedAt ? 'הורד לאפליקציה: ' + downloadedAt : 'טרם הורד');
+        state.style.display = 'block';
+        document.getElementById('release-folder-submit').textContent = 'שחרר שוב';
+    } else {
+        state.style.display = 'none';
+        document.getElementById('release-folder-submit').textContent = 'שחרר';
+    }
+    openModal('modal-release-folder');
 }
 
 function confirmCreateFolders(form) {

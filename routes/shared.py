@@ -21,6 +21,7 @@ from src.services.fault_code_service import FaultCodeService
 from src.services.reading_service import ReadingService
 from src.services.photo_service import PhotoService
 from src.services.shared_consumption_service import SharedConsumptionService
+from src.services.mobile_service import MobileService
 
 client_service = ClientService()
 period_service = ReadingPeriodService()
@@ -33,6 +34,7 @@ fault_code_service = FaultCodeService()
 reading_service = ReadingService()
 photo_service   = PhotoService()
 shared_consumption_service = SharedConsumptionService()
+mobile_service = MobileService()
 
 
 # --- Upload directory ---

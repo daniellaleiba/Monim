@@ -45,9 +45,11 @@ from routes.periods import periods_bp
 from routes.meters import meters_bp
 from routes.folders import folders_bp
 from routes.readers import readers_bp
+from routes.mobile_api import mobile_api_bp
 
 app = Flask(__name__)
 
+app.json.ensure_ascii = False  # Send Hebrew as UTF-8, not \uXXXX escapes
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'monim-dev-secret-key')
 
 # Register blueprints
@@ -57,7 +59,7 @@ app.register_blueprint(periods_bp)
 app.register_blueprint(meters_bp)
 app.register_blueprint(folders_bp)
 app.register_blueprint(readers_bp)
-
+app.register_blueprint(mobile_api_bp)
 
 if __name__ == '__main__':
     # debug=True + host='0.0.0.0' is fine for local development on a trusted network

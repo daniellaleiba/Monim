@@ -181,3 +181,17 @@ def assign_reader_to_folder(period_id):
         flash(str(e), 'error')
     return redirect(url_for('folders.folders', period_id=period_id))
 
+@folders_bp.route('/folders/<int:period_id>/release-folder', methods=['POST'])
+def release_folder(period_id):
+    """Release a folder to its reader's mobile app (re-release allowed). The checkbox is sent only when checked."""
+    folder_id = request.form.get('folder_id', type=int)
+    include_previous_readings = request.form.get('include_previous_readings') is not None
+    try:
+        if not folder_id:
+            raise ValueError('יש לבחור תיק עבודה')
+        folder_service.release_folder(folder_id, include_previous_readings)
+        flash('התיק שוחרר לקורא', 'success')
+    except ValueError as e:
+        flash(str(e), 'error')
+    return redirect(url_for('folders.folders', period_id=period_id))
+
