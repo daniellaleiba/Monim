@@ -396,13 +396,7 @@ function openMeterModal(period_meter_id) {
     }
 
     // --- הערות ---
-    const notesSection = document.getElementById('modal-notes-section');
-    if (m.manager_notes) {
-        document.getElementById('modal-notes').textContent = m.manager_notes;
-        notesSection.style.display = 'block';
-    } else {
-        notesSection.style.display = 'none';
-    }
+    document.getElementById('mf-manager-notes').value = m.manager_notes || '';
 
     // --- סטטוס ---
     const sel = document.getElementById('modal-status-select');
@@ -672,7 +666,7 @@ async function saveMeterChanges() {
         current_reading : currVal !== '' ? parseFloat(currVal) : null,
         work_status     : document.getElementById('modal-status-select').value || null,
         fault_code      : document.getElementById('mf-fault-code-input').value.trim() || null,
-        manager_notes   : document.getElementById('mf-field-notes').value.trim() || null,
+        manager_notes   : document.getElementById('mf-manager-notes').value.trim() || null,
         addon: (() => {
                 const v = document.getElementById('mf-addon-value').textContent.trim();
                 const n = parseFloat(v);

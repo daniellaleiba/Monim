@@ -28,22 +28,24 @@ Tests Summary:
    - Assign multiple meters at once
    - Assign to non-existent meter (blocked)
 
-6. Work Status (3 tests)
+6. Work Status (5 tests)
    - Update to invalid status (blocked)
    - Mark exception updates both status and fault code
    - Manager notes update
    - Test bulk estimate & calculate_estimate (7 cases)
+   - Manager notes: save trimmed, clear with empty / whitespace / None
 
-7. Not Found (3 tests)
+7. Not Found (4 tests)
    - Get non-existent meter
    - Update status on non-existent meter
    - Delete meters for non-existent source file
+   - Update manager notes on non-existent meter
 
 NOTE:
 These tests currently share setup data and some depend on previous test state.
 They are designed as ordered integration-style checks, not isolated unit tests.
 
-Total: 20 tests
+Total: 31 tests
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -356,6 +358,34 @@ def test_update_manager_notes():
     except AssertionError as e:
         report("עדכון הערות מנהל", False, str(e))
 
+def test_update_and_clear_manager_notes():
+    """הערות מנהל: נשמרות בלי רווחים מיותרים, ומתנקות מטקסט ריק / רווחים / None"""
+    try:
+        meters = meter_service.get_period_meters(test_period['period_id'])
+        meter_id = meters[2]['period_meter_id']
+
+        # Saved, without surrounding spaces
+        meter_service.update_manager_notes(meter_id, "  מאחורי השער  ")
+        assert meter_service.get_meter(meter_id)['manager_notes'] == "מאחורי השער"
+
+        # Empty text clears the note (NULL, not '')
+        meter_service.update_manager_notes(meter_id, "")
+        assert meter_service.get_meter(meter_id)['manager_notes'] is None
+
+        # Whitespace only clears too
+        meter_service.update_manager_notes(meter_id, "הערה")
+        meter_service.update_manager_notes(meter_id, "   ")
+        assert meter_service.get_meter(meter_id)['manager_notes'] is None
+
+        # None clears too
+        meter_service.update_manager_notes(meter_id, "הערה")
+        meter_service.update_manager_notes(meter_id, None)
+        assert meter_service.get_meter(meter_id)['manager_notes'] is None
+
+        report("הערות מנהל - שמירה וניקוי", True)
+    except AssertionError as e:
+        report("הערות מנהל - שמירה וניקוי", False, str(e))
+
 def test_update_fault_code_returns_true():
     """עדכון fault_code מחזיר True (לא None)"""
     try:
@@ -478,6 +508,18 @@ def test_update_status_nonexistent():
         except AssertionError as ae:
             report("עדכון סטטוס למונה לא קיים (חסום)", False, str(ae))
 
+def test_update_manager_notes_nonexistent():
+    """עדכון הערות מנהל למונה שלא קיים"""
+    try:
+        meter_service.update_manager_notes(99999, "הערה")
+        report("הערות מנהל למונה לא קיים", False, "לא נזרקה שגיאה")
+    except ValueError as e:
+        try:
+            assert "לא נמצא" in str(e)
+            report("הערות מנהל למונה לא קיים (חסום)", True)
+        except AssertionError as ae:
+            report("הערות מנהל למונה לא קיים (חסום)", False, str(ae))
+
 def test_delete_by_nonexistent_source_file():
     """מחיקת מונים לפי קובץ מקור - מחזיר 0 אם אין מה למחוק"""
     try:
@@ -535,6 +577,7 @@ def main():
         test_update_invalid_work_status()
         test_mark_exception()
         test_update_manager_notes()
+        test_update_and_clear_manager_notes()
         test_update_fault_code_returns_true()
         test_calculate_and_bulk_estimate()
 
@@ -542,6 +585,7 @@ def main():
         print("\n=== בדיקות רשומה לא קיימת ===")
         test_get_nonexistent_meter()
         test_update_status_nonexistent()
+        test_update_manager_notes_nonexistent()
         test_delete_by_nonexistent_source_file()
 
         # Summary

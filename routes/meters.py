@@ -153,10 +153,13 @@ def update_meter_manager(period_meter_id):
         return {'ok': False, 'error': 'אין נתונים'}, 400
     try:
         meter_service.apply_reading_to_current_state( period_meter_id, fault_code= data.get('fault_code') or None,
-            manager_notes= data.get('manager_notes') or None, current_reading = data.get('current_reading'), addon = data.get('addon'),
+            current_reading = data.get('current_reading'), addon = data.get('addon'),
             reading_time= data.get('reading_time') or None,  # ISO string מלא: "2026-05-10T14:30:00"
             is_estimated = data.get('is_estimated') or False,
         )
+        # Manager notes - if the key was sent (null/empty clears the notes)
+        if 'manager_notes' in data:
+            meter_service.update_manager_notes(period_meter_id, data['manager_notes'])
         #Save job status - if sent
         work_status = data.get('work_status')
         if work_status:

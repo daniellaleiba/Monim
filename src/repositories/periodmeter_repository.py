@@ -298,6 +298,24 @@ class PeriodMeterRepository:
         rows = self.db.execute_query(sql, (fault_code, period_meter_id), commit=True)
         return rows > 0
 
+    def update_manager_notes(self, period_meter_id: int, manager_notes: str | None) -> bool:
+        """
+        Update the manager notes for a meter. Pass None to clear them.
+
+            Note: like update_fault_code(), a None value here is meaningful: it explicitly
+                writes NULL to manager_notes. update_current_state() treats None as
+                "field not provided" and skips it.
+
+        Returns: True if updated
+        """
+        rows = self.db.execute_query("""
+            UPDATE period_meters
+            SET manager_notes = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE period_meter_id = %s
+        """, (manager_notes, period_meter_id), commit=True)
+        return rows > 0
+
     # --- UPDATE: Current state (after reading) 
  
     def update_current_state(self, period_meter_id: int, fault_code: str = None, manager_notes: str = None, current_reading: float = None, consumption: float = None, addon: float = None, reading_time=None,  is_estimated: bool = None) -> bool:

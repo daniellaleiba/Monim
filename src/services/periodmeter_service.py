@@ -392,6 +392,18 @@ class PeriodMeterService:
         Returns: True if updated
         """
         return self.repo.update_fault_code(period_meter_id, fault_code)
+
+    def update_manager_notes(self, period_meter_id: int, manager_notes: str | None) -> bool:
+        """
+        Set the manager's notes on a meter (they are sent to the reader's app on download).
+        Empty or whitespace-only text clears the notes (stored as NULL).
+
+        Returns: True if updated
+        Raises: ValueError if meter not found
+        """
+        self._ensure_meter_exists(period_meter_id)
+        notes = manager_notes.strip() if manager_notes else None
+        return self.repo.update_manager_notes(period_meter_id, notes or None)
     
     # --- CURRENT STATE (after reading / manager review):
     def apply_reading_to_current_state(self, period_meter_id: int, fault_code: str = None, 

@@ -308,11 +308,12 @@
                                     </td>
                                     <td style="padding:5px 8px; color:var(--gray-500);" id="mf-addon">-</td>
                                     <td style="padding:5px 8px;">
-                                        <textarea id="mf-field-notes" rows="2"
+                                        <textarea id="mf-field-notes" rows="2" readonly tabindex="-1"
+                                                placeholder="יתקבל מהקורא בשטח"
                                                 style="width:100%; font-size:12px; padding:4px 6px;
                                                         border:1px solid var(--gray-300); border-radius:5px;
-                                                        color:var(--gray-700); resize:vertical; min-width:120px;">
-                                        </textarea>
+                                                        color:var(--gray-700); background:var(--gray-50);
+                                                        cursor:default; resize:none; min-width:120px;"></textarea>
                                     </td>
                                 </tr>
                             </tbody>
@@ -406,9 +407,10 @@
                 </div>
 
             <!-- הערות -->
-            <div id="modal-notes-section" style="display:none;">
+            <div id="modal-notes-section">
                 <div class="meter-section-title">📝 הערות מנהל</div>
-                <div id="modal-notes" class="notes-box"></div>
+                <textarea id="mf-manager-notes" rows="3" class="form-input"
+                          style="width:100%; font-size:13px; resize:vertical;"></textarea>
             </div>
 
         </div>
