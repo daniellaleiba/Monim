@@ -171,18 +171,27 @@ CREATE TABLE readings (
     period_meter_id INTEGER NOT NULL REFERENCES period_meters(period_meter_id) ON DELETE CASCADE,
     reader_id INTEGER REFERENCES readers(reader_id) ON DELETE SET NULL,
 
-    previous_reading NUMERIC(12,3),
-    current_reading NUMERIC(12,3) NOT NULL,
+    previous_reading NUMERIC(12,3),      -- Snapshot of the meter's baseline at reading time
+    current_reading NUMERIC(12,3),       -- NULL only for a no-reading
     consumption NUMERIC(12,3),
+    is_no_reading BOOLEAN NOT NULL DEFAULT FALSE, -- The reader could not read the meter
+    first_attempt_reading NUMERIC(12,3), -- Value entered before re-verifying an exception
 
-    fault_code VARCHAR(50), 
-    notes TEXT,
+    fault_code VARCHAR(50),              -- Chosen by the reader
+    exception_type VARCHAR(30)           -- Detected by the app; NULL = no exception
+        CHECK (exception_type IN ('high', 'low', 'same', 'lower_than_previous')),
+    notes TEXT,                          -- The reader's notes (manager notes live on period_meters)
+    photo_missing BOOLEAN NOT NULL DEFAULT FALSE, -- A photo was taken but its file was lost on the device
 
     reading_status VARCHAR(30) NOT NULL DEFAULT 'submitted'
         CHECK (reading_status IN ('submitted', 'requires_review', 'approved', 'rejected', 'recheck')),
 
-    reading_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, -- Date + time of the reading
-    transmitted_at TIMESTAMP -- When was it broadcast from the terminal?
+    reading_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, -- When the reading was taken in the field
+    transmitted_at TIMESTAMP,                                   -- When it reached the server
+    version_id VARCHAR(36) UNIQUE,       -- UUID from the mobile app; NULL for other readings
+
+    CHECK ((is_no_reading AND current_reading IS NULL)
+        OR (NOT is_no_reading AND current_reading IS NOT NULL))
 );
 
 -- photos
