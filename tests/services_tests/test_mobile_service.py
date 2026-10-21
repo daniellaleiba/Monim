@@ -13,11 +13,17 @@ Tests Summary:
    - Unknown reader (blocked)
    - Only active fault codes are sent
 
-2. Receive One Reading (4 tests, more to come)
+2. Receive One Reading (10 tests)
    - Regular reading: saved, meter completed, progress, folder in progress
    - Fault code only: kept, meter still completed
    - Same version twice: saved once, no double progress
    - Correction (new version): history kept, meter updated, code cleared
+   - Verified exception: meter exception, reading waits for review, no progress
+   - No-reading: no value, reason and notes kept, meter exception
+   - Photo missing on a regular reading: flagged, meter still completed
+   - Invalid data (6 cases): rejected, nothing written
+   - Completed then corrected to an exception: folder progress goes back down
+   - Same version_id twice: blocked by the database (UniqueViolation)
 
 Total: 11 tests
 """
@@ -36,6 +42,7 @@ from src.services.fault_code_service import FaultCodeService
 from src.services.mobile_service import MobileService
 from datetime import datetime
 from src.services.reading_service import ReadingService
+from psycopg2 import errors as pg_errors
 
 client_service = ClientService()
 reader_service = ReaderService()
@@ -314,6 +321,148 @@ def test_receive_correction_new_version():
     except AssertionError as e:
         report("תיקון - שורה נוספת, מונה מתעדכן, בלי ספירה כפולה", False, str(e))
 
+def test_receive_verified_exception():
+    """חריגה מאומתת: המונה חריג, הקריאה ממתינה למנהל, ההתקדמות לא עולה"""
+    try:
+        folder, reader = create_folder_for_reader("200000015", "mobile_reader_15")
+        meter = first_meter(folder)
+
+        result = reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-exc-1',
+            is_no_reading=False, current_reading=1520.0, first_attempt_reading=1520.0,
+            exception_type='high', fault_code='30', read_at=READ_AT)
+
+        reading = result['reading']
+        assert reading['reading_status'] == 'requires_review'
+        assert reading['exception_type'] == 'high'
+        assert float(reading['first_attempt_reading']) == 1520.0
+
+        updated = meter_service.get_meter(meter['period_meter_id'])
+        assert updated['work_status'] == 'exception'
+        assert float(updated['current_reading']) == 1520.0
+        assert folder_service.get_folder(folder['folder_id'])['completed_meters'] == 0
+        report("חריגה מאומתת - חריג, ממתין למנהל, בלי התקדמות", True)
+    except AssertionError as e:
+        report("חריגה מאומתת - חריג, ממתין למנהל, בלי התקדמות", False, str(e))
+
+def test_receive_no_reading():
+    """אי-קריאה: נשמרת בלי ערך, עם הסיבה וההערה, והמונה חריג"""
+    try:
+        folder, reader = create_folder_for_reader("200000016", "mobile_reader_16")
+        meter = first_meter(folder)
+
+        result = reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-noread-1',
+            is_no_reading=True, fault_code='13', notes='כלב בחצר', read_at=READ_AT)
+
+        reading = result['reading']
+        assert reading['is_no_reading'] is True
+        assert reading['current_reading'] is None
+        assert reading['consumption'] is None
+        assert reading['fault_code'] == '13'
+        assert reading['notes'] == 'כלב בחצר'
+        assert reading['reading_status'] == 'requires_review'
+
+        updated = meter_service.get_meter(meter['period_meter_id'])
+        assert updated['work_status'] == 'exception'
+        assert updated['current_reading'] is None  # Never read
+        assert updated['current_fault_code'] == '13'
+        assert updated['manager_notes'] is None
+        report("אי-קריאה - בלי ערך, עם סיבה, מונה חריג", True)
+    except AssertionError as e:
+        report("אי-קריאה - בלי ערך, עם סיבה, מונה חריג", False, str(e))
+
+def test_receive_photo_missing_is_not_exception():
+    """תמונה חסרה בקריאה רגילה: מסומנת, אבל המונה עדיין הושלם"""
+    try:
+        folder, reader = create_folder_for_reader("200000017", "mobile_reader_17")
+        meter = first_meter(folder)
+
+        result = reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-photo-1',
+            is_no_reading=False, current_reading=1250.5, photo_missing=True, read_at=READ_AT)
+
+        assert result['reading']['photo_missing'] is True
+        assert result['reading']['reading_status'] == 'approved'
+        assert meter_service.get_meter(meter['period_meter_id'])['work_status'] == 'completed'
+        report("תמונה חסרה - מסומנת, לא חריג", True)
+    except AssertionError as e:
+        report("תמונה חסרה - מסומנת, לא חריג", False, str(e))
+
+def test_receive_invalid_data_writes_nothing():
+    """קלט לא תקין: נזרקת שגיאה, ושום דבר לא נכתב"""
+    folder, reader = create_folder_for_reader("200000018", "mobile_reader_18")
+    meter = first_meter(folder)
+    meter_id = meter['period_meter_id']
+
+    cases = [
+        ("אי-קריאה עם ערך", dict(is_no_reading=True, current_reading=100.0, fault_code='13')),
+        ("אי-קריאה בלי קוד", dict(is_no_reading=True)),
+        ("קריאה רגילה בלי ערך", dict(is_no_reading=False)),
+        ("חריגה בלי קוד תקלה", dict(is_no_reading=False, current_reading=1520.0, exception_type='high')),
+        ("סוג חריגה לא קיים", dict(is_no_reading=False, current_reading=1520.0, exception_type='huge', fault_code='30')),
+    ]
+    for i, (label, args) in enumerate(cases):
+        try:
+            reading_service.receive_mobile_reading(
+                meter_id, reader['reader_id'], version_id=f'v-bad-{i}', read_at=READ_AT, **args)
+            report(f"קלט לא תקין: {label}", False, "לא נזרקה שגיאה")
+        except ValueError:
+            report(f"קלט לא תקין: {label} (חסום)", True)
+
+    try:
+        reading_service.receive_mobile_reading(
+            meter_id, reader['reader_id'], version_id=None,
+            is_no_reading=False, current_reading=1250.5, read_at=READ_AT)
+        report("קלט לא תקין: בלי מזהה גרסה", False, "לא נזרקה שגיאה")
+    except ValueError:
+        report("קלט לא תקין: בלי מזהה גרסה (חסום)", True)
+
+    try:
+        assert reading_service.count_meter_readings(meter_id) == 0
+        assert meter_service.get_meter(meter_id)['work_status'] == 'assigned_to_reader'  # Untouched
+        report("קלט לא תקין - שום דבר לא נכתב", True)
+    except AssertionError as e:
+        report("קלט לא תקין - שום דבר לא נכתב", False, str(e))
+
+def test_completed_then_exception_recounts_progress():
+    """מונה שהושלם ותוקן לחריג: ההתקדמות של התיק יורדת חזרה"""
+    try:
+        folder, reader = create_folder_for_reader("200000019", "mobile_reader_19")
+        meter = first_meter(folder)
+
+        reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-recount-1',
+            is_no_reading=False, current_reading=1250.5, read_at=READ_AT)
+        assert folder_service.get_folder(folder['folder_id'])['completed_meters'] == 1
+
+        reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-recount-2',
+            is_no_reading=True, fault_code='13', read_at=READ_AT)
+
+        assert meter_service.get_meter(meter['period_meter_id'])['work_status'] == 'exception'
+        assert folder_service.get_folder(folder['folder_id'])['completed_meters'] == 0
+        report("הושלם ואז חריג - ההתקדמות מתעדכנת", True)
+    except AssertionError as e:
+        report("הושלם ואז חריג - ההתקדמות מתעדכנת", False, str(e))
+
+def test_same_version_blocked_by_database():
+    """רשת הביטחון: ה-DB עצמו חוסם שורה שנייה עם אותו version_id (UniqueViolation)"""
+    folder, reader = create_folder_for_reader("200000020", "mobile_reader_20")
+    meter = first_meter(folder)
+    row = dict(period_meter_id=meter['period_meter_id'], reader_id=reader['reader_id'],
+               previous_reading=None, current_reading=100.0, consumption=None,
+               version_id='v-unique-1')
+
+    reading_service.repo.create(**row)
+    try:
+        reading_service.repo.create(**row)
+        report("UNIQUE על version_id", False, "לא נזרקה שגיאה")
+    except pg_errors.UniqueViolation:
+        report("UNIQUE על version_id (חסום, UniqueViolation)", True)
+    except Exception as e:
+        report("UNIQUE על version_id", False, f"נזרק {type(e).__name__} ולא UniqueViolation")
+
 #  RUN ALL TESTS
 
 def main():
@@ -340,6 +489,12 @@ def main():
         test_receive_reading_with_fault_code_only()
         test_receive_same_version_twice()
         test_receive_correction_new_version()
+        test_receive_verified_exception()
+        test_receive_no_reading()
+        test_receive_photo_missing_is_not_exception()
+        test_receive_invalid_data_writes_nothing()
+        test_completed_then_exception_recounts_progress()
+        test_same_version_blocked_by_database()
 
         # Summary
         print("\n" + "=" * 50)
