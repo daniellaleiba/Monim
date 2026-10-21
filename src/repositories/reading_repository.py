@@ -3,7 +3,7 @@ Reading Repository - Data Access Layer
 
 
 Data access for readings: the append-only field-event log (every reading attempt, correction, or review action). 
-Also has a ready-made bulk "latest reading per meter" lookup, not yet wired into the service layer.
+Also has a bulk "latest reading per meter" lookup, used by the meters screen.
 """
  
 from database.connection import Database
@@ -24,8 +24,9 @@ class ReadingRepository:
         - status updates
         - history and filtering queries
  
-    Note: Reading does NOT update period_meter state - that's the Service's job.
-          Reading does NOT calculate consumption - that's the Service's job.
+     Note: called by ReadingService.get_latest_readings_for_meters, for the meters screen
+            (the reader's notes and transmit time of each meter's latest reading).
+            One query for any number of meters, instead of one per meter (N+1).
  
     Relevant indexes:
         - idx_readings_period_meter (period_meter_id)
@@ -116,7 +117,7 @@ class ReadingRepository:
         return self.db.execute_query("""
             SELECT * FROM readings
             WHERE period_meter_id = %s
-            ORDER BY reading_time DESC
+            ORDER BY reading_time DESC, reading_id DESC
             LIMIT 1
         """, (period_meter_id,), fetch="one")
     
@@ -135,7 +136,7 @@ class ReadingRepository:
             SELECT DISTINCT ON (period_meter_id) *
             FROM readings
             WHERE period_meter_id = ANY(%s)
-            ORDER BY period_meter_id, reading_time DESC
+            ORDER BY period_meter_id, reading_time DESC, reading_id DESC
         """, (period_meter_ids,), fetch="all")
         
         return {row['period_meter_id']: row for row in rows}

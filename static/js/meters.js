@@ -342,9 +342,9 @@ function openMeterModal(period_meter_id) {
         const rt = m.reading_time || raw.reading_date || null;
         readingDate.value = rt ? rt.substring(0, 10) : '';
     }
-    // ת. שידור  מתוך transmitted_at (אם קיים)
+    // ת. שידור  מתוך הקריאה האחרונה בשטח (תצוגה בלבד)
     if (transmissionDate) {
-        const ta = m.transmitted_at || raw.transmitted_at || null;
+        const ta = m.field_transmitted_at || null;
         transmissionDate.value = ta ? ta.substring(0, 10) : '';
     }
     // שעה

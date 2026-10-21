@@ -310,6 +310,14 @@ class ReadingService:
     def get_readings_for_review(self) -> List[dict]:
         """Get all readings that need review"""
         return self.repo.list_by_status('requires_review')
+
+    def get_latest_readings_for_meters(self, period_meter_ids: List[int]) -> dict:
+        """
+        The latest reading of each meter, in one query: {period_meter_id: reading}.
+        Meters with no reading are simply missing from the dict.
+        Used by the meters screen (reader notes, transmit time).
+        """
+        return self.repo.get_latest_by_period_meter_ids(period_meter_ids)
     
     # --- STATUS MANAGEMENT:
  

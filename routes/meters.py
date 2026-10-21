@@ -39,11 +39,14 @@ def _build_meters_view(period_id, client_id):
         except Exception:
             folder_names[fid] = f'תיק {fid}'
 
+    # Latest field reading per meter (reader notes, transmit time) - one query for all meters
+    latest_readings = reading_service.get_latest_readings_for_meters([m['period_meter_id'] for m in meters])
+
     for m in meters:
-        m['folder_name']    = folder_names.get(m.get('folder_id'), '')
-         # Placeholder until the field-reader mobile app exists 
-        m['transmitted_at'] = None
-        m['field_notes']    = None
+        m['folder_name'] = folder_names.get(m.get('folder_id'), '')
+        latest = latest_readings.get(m['period_meter_id'])
+        m['field_notes']          = latest['notes'] if latest else None
+        m['field_transmitted_at'] = latest['transmitted_at'] if latest else None
 
     summary = meter_service.get_period_status_summary(period_id)
 
