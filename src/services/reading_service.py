@@ -12,8 +12,12 @@ from src.services.periodmeter_service import PeriodMeterService
 from src.services.workfolder_service import WorkFolderService
 from typing import List, Optional
 from decimal import Decimal
+from datetime import datetime
+from psycopg2 import errors as pg_errors
  
- 
+# Exception types the mobile app can send (readings.exception_type CHECK)
+VALID_EXCEPTION_TYPES = ('high', 'low', 'same', 'lower_than_previous')
+
 class ReadingService:
     """
     Service for managing readings - field work results.
@@ -132,6 +136,109 @@ class ReadingService:
             self.meter_service.mark_exception(period_meter_id, fault_code, notes)
  
         return reading
+
+    def receive_mobile_reading(self, period_meter_id: int, reader_id: int, version_id: str,
+            is_no_reading: bool, current_reading=None, fault_code: str = None, notes: str = None,
+            exception_type: str = None, first_attempt_reading=None, photo_missing: bool = False,
+            read_at=None, received_at=None) -> dict:
+        """
+        Save one reading transmitted from the mobile app (WP3 transmit flow).
+
+        Order matters: all checks first, then meter and folder updates, and the
+        reading row itself LAST. That row (with version_id) is the "done" marker:
+        if anything fails before it, a retransmission runs everything again, and
+        every step before it is safe to repeat.
+
+        Status rules:
+            - verified exception (exception_type) or no-reading:
+              meter 'exception', reading 'requires_review' (waits for the manager)
+            - any other reading, with or without a fault code:
+              meter 'completed' (folder progress advances), reading 'approved'
+
+        Notes:
+            - The reader's notes go to readings.notes only, never to manager_notes.
+            - Each version is a full snapshot: the meter's fault code is set to this
+              version's code, including clearing it.
+            - Known limitation: a correction from a reading to a no-reading keeps the
+              old current_reading on the meter (the reading log is correct).
+
+        Returns: {'reading': the reading row, 'already_received': bool}
+        Raises: ValueError if the data is invalid (nothing is written)
+        """
+        if not version_id:
+            raise ValueError("חסר מזהה גרסה לקריאה")
+
+        # 1. Already received this version? Nothing to do.
+        existing = self.repo.get_by_version_id(version_id)
+        if existing:
+            return {'reading': existing, 'already_received': True}
+
+        # 2. All checks, before any write
+        meter = self.meter_service.get_meter(period_meter_id)
+        if not meter:
+            raise ValueError(f"מונה {period_meter_id} לא נמצא במערכת")
+
+        if is_no_reading:
+            if current_reading is not None:
+                raise ValueError("אי-קריאה לא יכולה לכלול ערך קריאה")
+            if not fault_code:
+                raise ValueError("אי-קריאה חייבת קוד סיבה")
+        elif not self._validate_current_reading(current_reading):
+            raise ValueError("ערך קריאה לא תקין: חייב להיות מספר")
+
+        if exception_type is not None:
+            if exception_type not in VALID_EXCEPTION_TYPES:
+                raise ValueError(f"סוג חריגה לא תקין: {exception_type}")
+            if not fault_code:
+                raise ValueError("חריגה מאומתת חייבת קוד תקלה")
+
+        is_exception = is_no_reading or exception_type is not None
+        received_at = received_at or datetime.now()
+        previous_reading = meter.get('previous_reading')
+        consumption = None
+        if not is_no_reading and previous_reading is not None:
+            consumption = PeriodMeterService._calculate_consumption(current_reading, previous_reading)
+
+        # 3. Meter current state (repeating it overwrites with the same values)
+        self.meter_service.apply_reading_to_current_state(
+            period_meter_id,
+            current_reading=None if is_no_reading else float(current_reading),
+            reading_time=read_at)
+        self.meter_service.update_fault_code(period_meter_id, fault_code)
+
+        # 4. Folder: start work if it is still 'assigned' (normally the download did this)
+        folder_id = meter.get('folder_id')
+        if folder_id:
+            folder = self.folder_service.get_folder(folder_id)
+            if folder and folder['status'] == 'assigned':
+                self.folder_service.start_folder_work(folder_id)
+
+        # 5. Meter status
+        if is_exception:
+            self.meter_service.update_work_status(period_meter_id, 'exception')
+            # A completed meter that became an exception: recount the folder's progress
+            if meter['work_status'] == 'completed' and folder_id:
+                self.folder_service.update_folder_progress(folder_id)
+        else:
+            # Meter 'completed' + folder progress +1, guarded against double counting
+            self.complete_meter_reading(period_meter_id)
+
+        # 6. The "done" marker: the reading row with version_id, written last
+        try:
+            reading = self.repo.create(
+                period_meter_id=period_meter_id, reader_id=reader_id,
+                previous_reading=previous_reading, current_reading=None if is_no_reading else current_reading,
+                consumption=consumption, fault_code=fault_code, notes=notes,
+                reading_status='requires_review' if is_exception else 'approved',
+                transmitted_at=received_at, reading_time=read_at,
+                is_no_reading=is_no_reading, first_attempt_reading=first_attempt_reading,
+                exception_type=exception_type, photo_missing=photo_missing,
+                version_id=version_id)
+        except pg_errors.UniqueViolation:
+            # The same version arrived twice at the same moment: the other request saved it
+            return {'reading': self.repo.get_by_version_id(version_id), 'already_received': True}
+
+        return {'reading': reading, 'already_received': False}
     
     def complete_meter_reading(self, period_meter_id: int) -> bool:
         """

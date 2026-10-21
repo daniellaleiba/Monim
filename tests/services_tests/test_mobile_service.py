@@ -13,7 +13,13 @@ Tests Summary:
    - Unknown reader (blocked)
    - Only active fault codes are sent
 
-Total: 7 tests
+2. Receive One Reading (4 tests, more to come)
+   - Regular reading: saved, meter completed, progress, folder in progress
+   - Fault code only: kept, meter still completed
+   - Same version twice: saved once, no double progress
+   - Correction (new version): history kept, meter updated, code cleared
+
+Total: 11 tests
 """
 import sys, os, json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -28,6 +34,8 @@ from src.services.folder_template_service import FolderTemplateService
 from src.services.workfolder_service import WorkFolderService
 from src.services.fault_code_service import FaultCodeService
 from src.services.mobile_service import MobileService
+from datetime import datetime
+from src.services.reading_service import ReadingService
 
 client_service = ClientService()
 reader_service = ReaderService()
@@ -38,17 +46,15 @@ template_service = FolderTemplateService()
 folder_service = WorkFolderService()
 fault_code_service = FaultCodeService()
 mobile_service = MobileService()
+reading_service = ReadingService()
+
+READ_AT = datetime(2026, 10, 21, 9, 30)  # When the reading was taken in the field
 
 # The keys the contract defines, exactly
 PACKAGE_KEYS = {
-    'id', 'folder_number', 'folder_name', 'client_name', 'period_year',
-    'period_number', 'reader_id', 'walk_order_start', 'walk_order_end',
-    'include_previous_readings', 'meters',
-}
-METER_KEYS = {
-    'meter_number', 'customer_number', 'customer_name', 'address',
-    'walk_order', 'previous_reading', 'manager_notes',
-}
+    'id', 'folder_number', 'folder_name', 'client_name', 'period_year', 'period_number', 'reader_id', 'walk_order_start', 'walk_order_end',
+    'include_previous_readings', 'meters',}
+METER_KEYS = { 'meter_number', 'customer_number', 'customer_name', 'address', 'walk_order', 'previous_reading', 'manager_notes',}
 
 
 def default_meter_rows():
@@ -85,6 +91,10 @@ def create_folder_for_reader(corp_number, reader_username, release=True, include
     if release:
         folder_service.release_folder(folder['folder_id'], include_previous_readings=include_previous)
     return folder, reader
+
+def first_meter(folder):
+    """Helper: the first meter (MTR-MOB-001, previous reading 1234.5) of a test folder"""
+    return meter_service.get_meter_by_number(folder['period_id'], 'MTR-MOB-001')
 
 #  1. DOWNLOAD PAYLOAD
 
@@ -212,6 +222,98 @@ def test_only_active_fault_codes():
     except AssertionError as e:
         report("רק קודי תקלה פעילים", False, str(e))
 
+#  2. RECEIVE ONE READING (ReadingService.receive_mobile_reading)
+
+def test_receive_regular_reading():
+    """קריאה רגילה: נשמרת, המונה הושלם, ההתקדמות עולה, התיק בביצוע"""
+    try:
+        folder, reader = create_folder_for_reader("200000011", "mobile_reader_11")
+        meter = first_meter(folder)
+
+        result = reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-reg-1',
+            is_no_reading=False, current_reading=1250.5, notes='ליד השער', read_at=READ_AT)
+
+        assert result['already_received'] is False
+        reading = result['reading']
+        assert reading['reading_status'] == 'approved'
+        assert reading['version_id'] == 'v-reg-1'
+        assert reading['notes'] == 'ליד השער'
+        assert reading['reading_time'] == READ_AT  # Field time, not server time
+        assert reading['transmitted_at'] is not None
+
+        updated = meter_service.get_meter(meter['period_meter_id'])
+        assert float(updated['current_reading']) == 1250.5
+        assert float(updated['consumption']) == 16.0  # 1250.5 - 1234.5
+        assert updated['work_status'] == 'completed'
+        assert updated['manager_notes'] is None  # Reader notes never go here
+
+        updated_folder = folder_service.get_folder(folder['folder_id'])
+        assert updated_folder['completed_meters'] == 1
+        assert updated_folder['status'] == 'in_progress'  # Was 'assigned' (not downloaded)
+        report("קריאה רגילה - נשמרת, מונה הושלם, התקדמות", True)
+    except AssertionError as e:
+        report("קריאה רגילה - נשמרת, מונה הושלם, התקדמות", False, str(e))
+
+def test_receive_reading_with_fault_code_only():
+    """קריאה + קוד תקלה, בלי חריגה: הקוד נשמר, והמונה עדיין הושלם"""
+    try:
+        folder, reader = create_folder_for_reader("200000012", "mobile_reader_12")
+        meter = first_meter(folder)
+
+        result = reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-fault-1',
+            is_no_reading=False, current_reading=1250.5, fault_code='14', read_at=READ_AT)
+
+        assert result['reading']['reading_status'] == 'approved'
+        updated = meter_service.get_meter(meter['period_meter_id'])
+        assert updated['current_fault_code'] == '14'
+        assert updated['work_status'] == 'completed'  # A fault code alone is not an exception
+        report("קוד תקלה בלבד - נשמר, המונה הושלם (לא חריג)", True)
+    except AssertionError as e:
+        report("קוד תקלה בלבד - נשמר, המונה הושלם (לא חריג)", False, str(e))
+
+def test_receive_same_version_twice():
+    """אותה גרסה פעמיים (האישור לא הגיע): לא נשמרת שוב, וההתקדמות לא עולה פעמיים"""
+    try:
+        folder, reader = create_folder_for_reader("200000013", "mobile_reader_13")
+        meter = first_meter(folder)
+        args = dict(version_id='v-dup-1', is_no_reading=False, current_reading=1250.5, read_at=READ_AT)
+
+        first = reading_service.receive_mobile_reading(meter['period_meter_id'], reader['reader_id'], **args)
+        second = reading_service.receive_mobile_reading(meter['period_meter_id'], reader['reader_id'], **args)
+
+        assert first['already_received'] is False
+        assert second['already_received'] is True
+        assert second['reading']['reading_id'] == first['reading']['reading_id']
+        assert reading_service.count_meter_readings(meter['period_meter_id']) == 1
+        assert folder_service.get_folder(folder['folder_id'])['completed_meters'] == 1
+        report("אותה גרסה פעמיים - נשמרת פעם אחת", True)
+    except AssertionError as e:
+        report("אותה גרסה פעמיים - נשמרת פעם אחת", False, str(e))
+
+def test_receive_correction_new_version():
+    """תיקון (גרסה חדשה לאותו מונה): שורה נוספת ביומן, המונה מתעדכן, ההתקדמות לא עולה פעמיים"""
+    try:
+        folder, reader = create_folder_for_reader("200000014", "mobile_reader_14")
+        meter = first_meter(folder)
+
+        reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-cor-1',
+            is_no_reading=False, current_reading=1250.5, fault_code='14', read_at=READ_AT)
+        reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-cor-2',
+            is_no_reading=False, current_reading=1260.0, read_at=READ_AT)
+
+        assert reading_service.count_meter_readings(meter['period_meter_id']) == 2  # History kept
+        updated = meter_service.get_meter(meter['period_meter_id'])
+        assert float(updated['current_reading']) == 1260.0
+        assert updated['current_fault_code'] is None  # The correction removed the code
+        assert folder_service.get_folder(folder['folder_id'])['completed_meters'] == 1
+        report("תיקון - שורה נוספת, מונה מתעדכן, בלי ספירה כפולה", True)
+    except AssertionError as e:
+        report("תיקון - שורה נוספת, מונה מתעדכן, בלי ספירה כפולה", False, str(e))
+
 #  RUN ALL TESTS
 
 def main():
@@ -231,6 +333,13 @@ def main():
         test_unreleased_folder_not_included()
         test_unknown_reader_blocked()
         test_only_active_fault_codes()
+
+        # 2. Receive one reading
+        print("\n=== בדיקות קבלת קריאה ===")
+        test_receive_regular_reading()
+        test_receive_reading_with_fault_code_only()
+        test_receive_same_version_twice()
+        test_receive_correction_new_version()
 
         # Summary
         print("\n" + "=" * 50)
