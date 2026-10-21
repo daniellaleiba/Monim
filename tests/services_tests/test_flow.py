@@ -3,6 +3,9 @@ Monim - Happy Path Flow Test
 Full end-to-end business flow test using a real source file and the real parsing pipeline (no hand-built rows, no bypassed steps).
 Proves the architecture works from client creation to reading approval - including realistic, imperfect data.
 
+Proves the architecture works from client creation to reading approval - including realistic, imperfect data -
+and through the mobile app flow: release → download → transmit from the field → folder completion.
+
 Tests Summary:
 
 1. Create Client
@@ -38,7 +41,23 @@ Tests Summary:
    - Verify meter and folder state updates
    - Approve reading and verify completion
 
-Total: 7 steps with multiple assertions each.
+8. Release Folder To The Mobile App
+   - Assign the second folder to the reader and release it
+   - Only the released folder is ready for download (folder 1 is assigned, not released)
+
+9. Download (mobile app)
+   - The payload holds the folder with its 6 meters
+   - The folder is marked downloaded and moves to in_progress; a second download is empty
+
+10. Transmit A Batch From The Field (mobile app)
+   - 5 regular readings, 1 no-reading, 1 meter added in the field: all accepted
+   - Folder progress 6/7; the no-reading is an exception; the field meter is marked
+
+11. A Correction Completes The Folder
+   - The reader reads the meter that was not read: meter completed, history kept
+   - The folder reaches 7/7 and is completed automatically
+
+Total: 11 steps with multiple assertions each.
 
 Error handling: each step runs through run_step(), which reports AssertionErrors via report() and re-raises to stop the run immediately,
 since later steps depend on earlier state. Other exceptions (bugs, DB errors) propagate with a full traceback rather than being swallowed.
@@ -55,6 +74,7 @@ from src.services.folder_template_service import FolderTemplateService
 from src.services.workfolder_service import WorkFolderService
 from src.services.reader_service import ReaderService
 from src.services.reading_service import ReadingService
+from src.services.mobile_service import MobileService
 
 client_service = ClientService()
 period_service = ReadingPeriodService()
@@ -64,6 +84,10 @@ template_service = FolderTemplateService()
 folder_service = WorkFolderService()
 reader_service = ReaderService()
 reading_service = ReadingService()
+mobile_service = MobileService()
+
+# When the readings were taken in the field, as the app sends it (UTC)
+READ_AT_UTC = '2026-10-21T06:30:00.000Z'
 
 # Shared state between steps
 test_data = {}
@@ -80,6 +104,15 @@ def run_step(step_func, step_name):
     except AssertionError as e:
         report(step_name, False, str(e))
         raise
+
+def mobile_item(version_id, meter_number, **overrides):
+    """Helper: one reading in the transmit JSON list, as the app sends it"""
+    item = {'version_id': version_id, 'meter_number': meter_number, 'is_no_reading': False,
+            'current_reading': None, 'first_attempt_reading': None, 'exception_type': None,
+            'fault_code': None, 'notes': None, 'has_photo': False, 'photo_missing': False,
+            'read_at': READ_AT_UTC, 'latitude': None, 'longitude': None, 'new_meter': None}
+    item.update(overrides)
+    return item
 
 #  STEP 1: Create Client
 
@@ -301,6 +334,107 @@ def test_step7_create_reading():
     report("קריאה + צריכה + עדכון מצב + אישור + completed", True)
     print(f"    סיכום סופי: {summary}")
 
+#  STEP 8: Release a folder to the reader's mobile app
+
+def test_step8_release_folder():
+    """שיוך תיק 2 לקורא ושחרור לאפליקציה; תיק 1 משויך בלבד, ולכן לא מוכן להורדה"""
+    test_reader = test_data['test_reader']
+    app_folder = test_data['folders'][1]
+
+    folder_service.assign_reader_to_folder(app_folder['folder_id'], test_reader['reader_id'])
+    folder_service.release_folder(app_folder['folder_id'], include_previous_readings=True)
+
+    released = folder_service.get_folder(app_folder['folder_id'])
+    assert released['released_at'] is not None
+    assert released['status'] == 'assigned'
+
+    # Folder 1 is assigned to the same reader but was never released
+    ready = folder_service.get_folders_ready_for_download(test_reader['reader_id'])
+    assert [f['folder_id'] for f in ready] == [app_folder['folder_id']]
+
+    test_data['app_folder'] = app_folder
+    report("שחרור תיק 2 לאפליקציה (תיק 1 משויך בלבד)", True)
+
+#  STEP 9: The app downloads the folder
+
+def test_step9_download():
+    """הורדה לאפליקציה: התיק עם 6 המונים, סימון הורדה, בביצוע, ולא נשלח שוב"""
+    reader_id = test_data['test_reader']['reader_id']
+    app_folder = test_data['app_folder']
+
+    payload = mobile_service.get_download_payload(reader_id)
+    assert len(payload['fault_codes']) > 0
+    assert len(payload['packages']) == 1
+    package = payload['packages'][0]
+    assert package['id'] == app_folder['folder_id']
+    assert len(package['meters']) == 6
+
+    downloaded = folder_service.get_folder(app_folder['folder_id'])
+    assert downloaded['downloaded_at'] is not None
+    assert downloaded['status'] == 'in_progress'
+
+    assert mobile_service.get_download_payload(reader_id)['packages'] == []
+
+    test_data['package'] = package
+    report("הורדה: 6 מונים, התיק בביצוע, לא יורד פעמיים", True)
+
+#  STEP 10: The app transmits a batch from the field
+
+def test_step10_transmit():
+    """שידור מנה: 5 קריאות רגילות, אי-קריאה אחת, ומונה חדש מהשטח"""
+    app_folder = test_data['app_folder']
+    meters = test_data['package']['meters']
+
+    batch = [
+        mobile_item(f'flow-{i}', m['meter_number'], current_reading=(m['previous_reading'] or 0) + 10)
+        for i, m in enumerate(meters[:5])
+    ]
+    no_read_meter = meters[5]
+    batch.append(mobile_item('flow-noread', no_read_meter['meter_number'],
+                             is_no_reading=True, fault_code='13', notes='כלב בחצר'))
+    batch.append(mobile_item('flow-new', '99887766', current_reading=310.0,new_meter={'customer_number': None, 'customer_name': 'דוד כהן',
+                            'address': 'הרצל 14', 'walk_order': None}))
+
+    response = mobile_service.receive_readings(app_folder['folder_id'], batch, photos={})
+    assert all(r['status'] == 'accepted' for r in response['results']), response['results']
+
+    folder = folder_service.get_folder(app_folder['folder_id'])
+    assert folder['total_meters'] == 7      # 6 from the file + 1 from the field
+    assert folder['completed_meters'] == 6  # 5 regular + the field meter
+    assert folder['status'] == 'in_progress'
+
+    period_id = test_data['test_period']['period_id']
+    no_read = meter_service.get_meter_by_number(period_id, no_read_meter['meter_number'])
+    assert no_read['work_status'] == 'exception'
+    field_meter = meter_service.get_meter_by_number(period_id, '99887766')
+    assert field_meter['added_in_field'] is True
+
+    test_data['no_read_meter'] = no_read
+    report("שידור מנה: 7 התקבלו, תיק 6/7, אי-קריאה חריגה, מונה מהשטח נוסף", True)
+
+#  STEP 11: A correction completes the whole folder
+
+def test_step11_correction_completes_folder():
+    """הקורא חוזר למונה שלא נקרא ומשדר קריאה: המונה הושלם, והתיק כולו הושלם (7/7)"""
+    app_folder = test_data['app_folder']
+    meter = test_data['no_read_meter']
+    previous = float(meter['previous_reading'] or 0)
+
+    response = mobile_service.receive_readings(app_folder['folder_id'], [mobile_item('flow-noread-fixed', meter['meter_number'], current_reading=previous + 10)], photos={})
+    assert response['results'][0]['status'] == 'accepted'
+
+    assert meter_service.get_meter(meter['period_meter_id'])['work_status'] == 'completed'
+    assert reading_service.count_meter_readings(meter['period_meter_id']) == 2  # History kept
+
+    folder = folder_service.get_folder(app_folder['folder_id'])
+    assert folder['completed_meters'] == 7
+    assert folder['status'] == 'completed'
+    assert folder['completed_at'] is not None
+
+    report("תיקון: המונה הושלם, והתיק כולו הושלם אוטומטית (7/7)", True)
+    summary = meter_service.get_period_status_summary(test_data['test_period']['period_id'])
+    print(f"    סיכום סופי: {summary}")
+
 #  RUN ALL STEPS
 def main():
     reset_counters()
@@ -330,6 +464,18 @@ def main():
 
         print("\n ---שלב 7: קריאה ואישור ")
         run_step(test_step7_create_reading, "שלב 7: קריאה ואישור")
+
+        print("\n ---שלב 8: שחרור תיק לאפליקציה ")
+        run_step(test_step8_release_folder, "שלב 8: שחרור לאפליקציה")
+
+        print("\n ---שלב 9: הורדה לאפליקציה ")
+        run_step(test_step9_download, "שלב 9: הורדה")
+
+        print("\n ---שלב 10: שידור מנה מהשטח ")
+        run_step(test_step10_transmit, "שלב 10: שידור")
+
+        print("\n ---שלב 11: תיקון שמשלים את התיק ")
+        run_step(test_step11_correction_completes_folder, "שלב 11: השלמת תיק")
 
         print("\n" + "=" * 50)
         print_summary()
