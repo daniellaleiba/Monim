@@ -589,6 +589,11 @@ select.form-input:disabled {
 .search-input { flex: 1; max-width: 440px; }
 .results-count { font-size: 13px; color: var(--gray-500); white-space: nowrap; }
 
+/* כפתור סינון "נוספו בשטח" - באותו סגנון של רשימות הסינון */
+.filter-toggle { background: white; font-family: inherit; cursor: pointer; white-space: nowrap; }
+.filter-toggle:hover { background: var(--gray-100); }
+.filter-toggle.active { background: #ecfeff; border-color: var(--primary); color: var(--primary-dark); font-weight: 600; }
+
 /* צביעת שורות לפי סטטוס */
 tr.row-completed  td { background: #f0fdf4; }
 tr.row-exception  td { background: #fff7ed; }

@@ -21,6 +21,7 @@ let currentSearch        = '';
 let currentFolderFilter  = null;  // מסנן לפי תיק (מהפניה ממסך תיקים)
 let currentWorkStatusFilter = '';
 let currentFaultCodeFilter  = '';
+let currentAddedInFieldFilter = false;  // מונים שנוספו בשטח
 
 // --- סינון וחיפוש ---
 
@@ -43,6 +44,14 @@ function onFilterChange() {
 
 function onFaultCodeFilter(val) {
     currentFaultCodeFilter = val;
+    renderVirtualScroll();
+}
+
+function toggleAddedInFieldFilter() {
+    currentAddedInFieldFilter = !currentAddedInFieldFilter;
+    const btn = document.getElementById('filter-added-in-field');
+    btn.classList.toggle('active', currentAddedInFieldFilter);
+    btn.setAttribute('aria-pressed', String(currentAddedInFieldFilter));
     renderVirtualScroll();
 }
 
@@ -80,7 +89,8 @@ function getFiltered() {
         const workStatusOk  = !currentWorkStatusFilter  || m.work_status === currentWorkStatusFilter;
         const faultCodeOk  = !currentFaultCodeFilter ||
                              m.current_fault_code === currentFaultCodeFilter;
-        return statusOk && folderOk && searchOk && workStatusOk && faultCodeOk;
+        const addedInFieldOk = !currentAddedInFieldFilter || m.added_in_field === true;
+        return statusOk && folderOk && searchOk && workStatusOk && faultCodeOk && addedInFieldOk;
     });
 }
 
@@ -455,6 +465,10 @@ document.addEventListener('DOMContentLoaded', () => {
         opt.textContent = desc;
         fcSelect.appendChild(opt);
     });
+
+    // ספירת מונים שנוספו בשטח
+    document.getElementById('added-in-field-count').textContent =
+        ALL_METERS.filter(m => m.added_in_field === true).length;
 
     setViewportHeight();
     renderVirtualScroll();

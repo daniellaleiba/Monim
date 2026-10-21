@@ -114,6 +114,11 @@
             onchange="onFaultCodeFilter(this.value)">
         <option value="">כל קודי תקלה</option>
     </select>
+    <button type="button" id="filter-added-in-field" class="form-input filter-toggle"
+            style="width:auto;" aria-pressed="false"
+            onclick="toggleAddedInFieldFilter()">
+        נוספו בשטח (<span id="added-in-field-count">0</span>)
+    </button>
 </div>
 
 <!-- טבלת מונים -->
