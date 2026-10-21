@@ -11,6 +11,7 @@ DROP TABLE IF EXISTS reading_periods CASCADE;
 DROP TABLE IF EXISTS readers CASCADE;
 DROP TABLE IF EXISTS clients CASCADE;
 DROP TABLE IF EXISTS fault_codes CASCADE;
+DROP TABLE IF EXISTS rejected_readings CASCADE;
 
 -- client
 CREATE TABLE clients (
@@ -214,6 +215,22 @@ CREATE TABLE fault_codes (
     active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
+-- rejected_readings
+-- Readings from the mobile app that the server could not accept (permanent reason),
+-- kept so the manager can see and handle them. Holds only open problems:
+-- rows are deleted once a reading for that meter in that folder is accepted.
+CREATE TABLE rejected_readings (
+    rejected_id SERIAL PRIMARY KEY,
+    folder_id INTEGER NOT NULL REFERENCES work_folders(folder_id) ON DELETE CASCADE,
+    version_id VARCHAR(36) NOT NULL UNIQUE,   -- One row per reading version
+    meter_number VARCHAR(50) NOT NULL,
+    reason VARCHAR(50) NOT NULL,              -- e.g. meter_not_found
+    payload JSONB NOT NULL,                   -- The reading exactly as the app sent it
+    attempts INTEGER NOT NULL DEFAULT 1 CHECK (attempts >= 1), -- How many times it was rejected
+    first_rejected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_rejected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes
 
 -- periods
@@ -231,6 +248,8 @@ CREATE INDEX idx_work_folders_reader ON work_folders(assigned_to);
 -- readings
 CREATE INDEX idx_readings_period_meter ON readings(period_meter_id);
 CREATE INDEX idx_readings_reader ON readings(reader_id);
+-- rejected readings
+CREATE INDEX idx_rejected_readings_folder_meter ON rejected_readings(folder_id, meter_number);
 
 -- photos
 CREATE INDEX idx_photos_reading ON photos(reading_id);
