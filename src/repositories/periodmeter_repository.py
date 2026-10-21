@@ -20,6 +20,7 @@ class PeriodMeterRepository:
  
     Responsibilities:
         - bulk insert of meters (from parsed source file)
+        - insert of a single meter added by a reader in the field
         - get by id / period / folder / meter_number
         - update folder assignment
         - update work status
@@ -84,7 +85,31 @@ class PeriodMeterRepository:
                 ))
  
             return len(rows)
- 
+
+    def create_field_meter(self, period_id: int, folder_id: int, meter_number: str,
+        customer_number: str = None, customer_name: str = None, address: str = None,
+        walk_order: int = None, work_status: str = 'assigned_to_reader') -> dict:
+        """
+        Insert a meter a reader found in the field (not in the source file).
+        It has no source file and no row number, and is marked added_in_field = TRUE
+        (the table's CHECK allows NULL in those columns only for such meters).
+        It starts already assigned to the reader's folder.
+
+        Note: the Service must check that the meter number does not exist in the period yet
+              (UNIQUE(period_id, meter_number) would reject it), and must refresh the
+              folder's cached meter counts afterwards.
+
+        Returns: The created meter row
+        """
+        return self.db.execute_query("""
+            INSERT INTO period_meters
+                (period_id, folder_id, meter_number, customer_number, customer_name,
+                 address, walk_order, work_status, added_in_field)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, TRUE)
+            RETURNING *
+        """, (period_id, folder_id, meter_number, customer_number, customer_name,
+              address, walk_order, work_status), fetch="one", commit=True)
+    
     # --- READ: Single record
  
     def get_by_id(self, period_meter_id: int) -> Optional[dict]:
