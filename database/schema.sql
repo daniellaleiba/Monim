@@ -82,12 +82,12 @@ CREATE TABLE period_source_files (
 CREATE TABLE period_meters (
     period_meter_id SERIAL PRIMARY KEY,
     period_id INTEGER NOT NULL REFERENCES reading_periods(period_id) ON DELETE CASCADE,
-    source_file_id INTEGER NOT NULL REFERENCES period_source_files(source_file_id) ON DELETE RESTRICT,
+    source_file_id INTEGER REFERENCES period_source_files(source_file_id) ON DELETE RESTRICT, -- NULL for meters added in the field
     folder_id INTEGER, -- referance later (on alter table)
 
     -- Identity (from source file)
     meter_number      VARCHAR(50)    NOT NULL,
-    row_number        INTEGER        NOT NULL CHECK (row_number > 0), -- row in original file, for debugging
+    row_number        INTEGER        CHECK (row_number > 0), -- row in original file, for debugging; NULL for meters added in the field
     customer_number   VARCHAR(50),
     customer_name     VARCHAR(100),
     address           VARCHAR(100),
@@ -113,6 +113,10 @@ CREATE TABLE period_meters (
     manager_notes TEXT,
    
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Origin: from the source file, or added by a reader in the field
+    added_in_field BOOLEAN NOT NULL DEFAULT FALSE,
+    CHECK ((added_in_field AND source_file_id IS NULL AND row_number IS NULL)
+        OR (NOT added_in_field AND source_file_id IS NOT NULL AND row_number IS NOT NULL)),
     UNIQUE (period_id, meter_number)
 );
 
