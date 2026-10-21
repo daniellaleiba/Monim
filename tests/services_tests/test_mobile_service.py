@@ -42,6 +42,14 @@ Tests Summary:
    - Photo flagged but not sent: missing_photo, nothing written
    - Unknown package: the whole request fails
 
+5. Rejected Readings Kept For The Manager (6 tests)
+   - A permanent rejection is saved with the original reading
+   - The same version rejected again: one row, attempts = 2
+   - Each of the 4 permanent reasons is saved with the right reason
+   - A temporary rejection (missing photo) is not saved
+   - An accepted reading clears all of its meter's rejections (every version)
+   - Clearing stays within the same folder
+   
 Total: 36 tests
 """
 import sys, os, json
@@ -754,6 +762,130 @@ def test_unknown_package_fails_the_request():
         except AssertionError as ae:
             report("תיק לא קיים (חסום)", False, str(ae))
 
+#  5. REJECTED READINGS KEPT FOR THE MANAGER (RejectedReadingService)
+
+rejected_service = mobile_service.rejected_service
+
+def test_permanent_rejection_is_saved():
+    """דחייה קבועה נשמרת: הסיבה, הקריאה כמו שהגיעה, ניסיון אחד"""
+    try:
+        folder, _ = create_folder_for_reader("200000041", "mobile_reader_41")
+
+        mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-rej-1', meter_number='55555', notes='מונה לא ברשימה')], photos={})
+
+        saved = rejected_service.get_rejection('v-rej-1')
+        assert saved is not None
+        assert saved['reason'] == 'meter_not_found'
+        assert saved['meter_number'] == '55555'
+        assert saved['folder_id'] == folder['folder_id']
+        assert saved['attempts'] == 1
+        assert saved['payload']['notes'] == 'מונה לא ברשימה'  # The reading as the app sent it
+        report("דחייה קבועה נשמרת עם הקריאה המקורית", True)
+    except AssertionError as e:
+        report("דחייה קבועה נשמרת עם הקריאה המקורית", False, str(e))
+
+def test_repeated_rejection_updates_one_row():
+    """אותה גרסה נדחית שוב: שורה אחת, attempts = 2"""
+    try:
+        folder, _ = create_folder_for_reader("200000042", "mobile_reader_42")
+        batch = [reading_item('v-rej-again', meter_number='55555')]
+
+        mobile_service.receive_readings(folder['folder_id'], batch, photos={})
+        mobile_service.receive_readings(folder['folder_id'], batch, photos={})
+
+        assert rejected_service.get_rejection('v-rej-again')['attempts'] == 2
+        assert len(rejected_service.get_folder_rejections(folder['folder_id'])) == 1
+        report("דחייה חוזרת - שורה אחת, attempts = 2", True)
+    except AssertionError as e:
+        report("דחייה חוזרת - שורה אחת, attempts = 2", False, str(e))
+
+def test_every_permanent_reason_is_saved():
+    """כל אחד מ-4 הקודים הקבועים נשמר, עם הסיבה הנכונה"""
+    try:
+        folder, _ = create_folder_for_reader("200000043", "mobile_reader_43")
+        add_other_folder(folder)
+
+        mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-perm-1', meter_number='55555'),
+            reading_item('v-perm-2', meter_number='MTR-MOB-OTHER'),
+            reading_item('v-perm-3', meter_number='MTR-MOB-OTHER', new_meter={'customer_name': 'x'}),
+            reading_item('v-perm-4', is_no_reading=True, current_reading=100.0, fault_code='13'),
+        ], photos={})
+
+        expected = {
+            'v-perm-1': 'meter_not_found',
+            'v-perm-2': 'meter_not_in_package',
+            'v-perm-3': 'meter_exists_in_other_folder',
+            'v-perm-4': 'invalid_data',
+        }
+        for version_id, reason in expected.items():
+            saved = rejected_service.get_rejection(version_id)
+            assert saved is not None, f"{version_id} ({reason}) was not saved"
+            assert saved['reason'] == reason, f"{version_id}: {saved['reason']} != {reason}"
+        report("כל 4 הקודים הקבועים נשמרים", True)
+    except AssertionError as e:
+        report("כל 4 הקודים הקבועים נשמרים", False, str(e))
+
+def test_temporary_rejection_is_not_saved():
+    """דחייה זמנית (תמונה שלא הגיעה) לא נשמרת"""
+    try:
+        folder, _ = create_folder_for_reader("200000044", "mobile_reader_44")
+
+        response = mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-temp-1', has_photo=True)], photos={})
+
+        assert response['results'][0]['reason'] == 'missing_photo'
+        assert rejected_service.get_rejection('v-temp-1') is None
+        report("דחייה זמנית לא נשמרת", True)
+    except AssertionError as e:
+        report("דחייה זמנית לא נשמרת", False, str(e))
+
+def test_accepted_reading_clears_the_meter_rejections():
+    """שתי גרסאות נדחו למונה 55555; המונה נוסף, קריאה מתקבלת - שתי הדחיות נמחקות"""
+    try:
+        folder, _ = create_folder_for_reader("200000045", "mobile_reader_45")
+
+        # Two versions of the same meter rejected: the first, and a correction
+        mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-fix-1', meter_number='55555', current_reading=120.0)], photos={})
+        mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-fix-2', meter_number='55555', current_reading=125.0)], photos={})
+        assert len(rejected_service.get_folder_rejections(folder['folder_id'])) == 2
+
+        # The manager adds the meter; the app sends the reading again, and it is accepted
+        meter_service.create_field_meter(folder['period_id'], folder['folder_id'], '55555')
+        folder_service.update_folder_progress(folder['folder_id'])
+        response = mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-fix-2', meter_number='55555', current_reading=125.0)], photos={})
+
+        assert response['results'][0]['status'] == 'accepted'
+        assert rejected_service.get_folder_rejections(folder['folder_id']) == []  # Both versions cleared
+        report("קריאה שהתקבלה מנקה את כל הדחיות של המונה", True)
+    except AssertionError as e:
+        report("קריאה שהתקבלה מנקה את כל הדחיות של המונה", False, str(e))
+
+def test_clearing_stays_in_the_same_folder():
+    """ניקוי במונה 55555 בתיק אחד לא נוגע בדחייה של 55555 בתיק אחר"""
+    try:
+        folder_a, _ = create_folder_for_reader("200000046", "mobile_reader_46")
+        folder_b, _ = create_folder_for_reader("200000047", "mobile_reader_47")
+        for folder, version_id in ((folder_a, 'v-a-1'), (folder_b, 'v-b-1')):
+            mobile_service.receive_readings(folder['folder_id'], [
+                reading_item(version_id, meter_number='55555')], photos={})
+
+        # Solved in folder A only
+        meter_service.create_field_meter(folder_a['period_id'], folder_a['folder_id'], '55555')
+        folder_service.update_folder_progress(folder_a['folder_id'])
+        mobile_service.receive_readings(folder_a['folder_id'], [
+            reading_item('v-a-2', meter_number='55555')], photos={})
+
+        assert rejected_service.get_folder_rejections(folder_a['folder_id']) == []
+        assert rejected_service.get_rejection('v-b-1') is not None  # Folder B untouched
+        report("ניקוי רק באותו תיק", True)
+    except AssertionError as e:
+        report("ניקוי רק באותו תיק", False, str(e))
+
 #  RUN ALL TESTS
 
 def main():
@@ -805,6 +937,15 @@ def main():
         test_reading_with_photo()
         test_photo_flagged_but_not_sent()
         test_unknown_package_fails_the_request()
+
+        # 5. Rejected readings kept for the manager
+        print("\n=== בדיקות קריאות שנדחו ===")
+        test_permanent_rejection_is_saved()
+        test_repeated_rejection_updates_one_row()
+        test_every_permanent_reason_is_saved()
+        test_temporary_rejection_is_not_saved()
+        test_accepted_reading_clears_the_meter_rejections()
+        test_clearing_stays_in_the_same_folder()
 
         # Summary
         print("\n" + "=" * 50)

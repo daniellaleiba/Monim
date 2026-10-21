@@ -18,6 +18,8 @@ from src.services.client_service import ClientService
 from src.services.fault_code_service import FaultCodeService
 from src.services.reading_service import ReadingService
 from src.services.photo_service import PhotoService
+from src.services.rejected_reading_service import RejectedReadingService
+from src.services import rejection_reasons as reasons
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +35,9 @@ class MobileService:
         - Build the download payload: active fault codes + the folders
           released to a reader, each with its meters
         - Mark downloaded folders (through WorkFolderService)
-        - Receive readings transmitted from the field: one result per reading
-          (accepted / rejected with a reason code), including meters added in the field and photos
+        - Receive readings transmitted from the field: one result per reading (accepted / rejected with a reason code), 
+            including meters added in the field and photos.
+            Rejected readings are kept for the manager (RejectedReadingService); an accepted reading clears its meter's open rejections.
 
     The payload follows the contract: snake_case keys, and every key is
     always present (None when the value is missing).
@@ -50,6 +53,7 @@ class MobileService:
         self.reading_service = ReadingService()
         self.photo_service = PhotoService()
         self.photo_dir = photo_dir  # A parameter, so tests can use a temporary folder
+        self.rejected_service = RejectedReadingService()
 
     # --- DOWNLOAD:
 
@@ -88,12 +92,10 @@ class MobileService:
         Args:
             package_id: The work folder (package) the readings belong to
             readings: The parsed "readings" JSON list from the request
-            photos: Uploaded files by part name (photo_<meter_number>); each must
-                    have .save(path) and .filename, like Flask's FileStorage
+            photos: Uploaded files by part name (photo_<meter_number>); each must have .save(path) and .filename, like Flask's FileStorage
 
         Returns: {'results': [{'version_id', 'status', 'reason'?}, ...]}
-        Raises: ValueError if the package does not exist or has no reader
-                (the whole request fails)
+        Raises: ValueError if the package does not exist or has no reader (the whole request fails)
         """
         folder = self.folder_service.get_folder(package_id)
         if not folder:
@@ -109,12 +111,22 @@ class MobileService:
                 reason = self._receive_one(folder, item, photos, received_at)
             except Exception:
                 logger.exception(f"Failed to receive reading {version_id} for package {package_id}")
-                reason = 'server_error'  # Temporary: the app keeps it and sends it again
+                reason = reasons.SERVER_ERROR  # Temporary: the app keeps it and sends it again
 
             if reason is None:
                 results.append({'version_id': version_id, 'status': 'accepted'})
             else:
                 results.append({'version_id': version_id, 'status': 'rejected', 'reason': reason})
+
+            # Keep the manager's list of open problems up to date. This is bookkeeping:
+            # if it fails, it is logged, and the reading's result stays as it is.
+            try:
+                if reason is None:
+                    self.rejected_service.resolve_meter(folder['folder_id'], item.get('meter_number') or '')
+                else:
+                    self.rejected_service.record_rejection(folder['folder_id'], item, reason)
+            except Exception:
+                logger.exception(f"Rejection bookkeeping failed for reading {version_id}")
 
         return {'results': results}
 
@@ -122,8 +134,9 @@ class MobileService:
 
     def _receive_one(self, folder: dict, item: dict, photos: dict, received_at: datetime) -> Optional[str]:
         """
-        Handle one reading. Returns None if accepted, or a rejection reason code.
-        All checks run before the first write (see receive_mobile_reading).
+        Handle one reading. Returns None if accepted, or a rejection reason code
+        (see rejection_reasons). All checks run before the first write
+        (see receive_mobile_reading).
         """
         meter_number = str(item.get('meter_number') or '').strip()
         new_meter = item.get('new_meter')
@@ -136,21 +149,21 @@ class MobileService:
                 item.get('version_id'), bool(item.get('is_no_reading')),
                 item.get('current_reading'), item.get('fault_code'), item.get('exception_type'))
         except ValueError:
-            return 'invalid_data'
+            return reasons.INVALID_DATA
         if not meter_number:
-            return 'invalid_data'
+            return reasons.INVALID_DATA
 
         photo_file = photos.get(f'photo_{meter_number}') if has_photo else None
         if has_photo and photo_file is None:
-            return 'missing_photo'
+            return reasons.MISSING_PHOTO
 
         # 2. Which meter: in this package, in another folder, or new from the field
         meter = self.meter_service.get_meter_by_number(folder['period_id'], meter_number)
         if meter and meter['folder_id'] != folder['folder_id']:
-            return 'meter_exists_in_other_folder' if new_meter else 'meter_not_in_package'
+            return reasons.METER_EXISTS_IN_OTHER_FOLDER if new_meter else reasons.METER_NOT_IN_PACKAGE
         if not meter:
             if not new_meter:
-                return 'meter_not_found'
+                return reasons.METER_NOT_FOUND
             try:
                 meter = self.meter_service.create_field_meter(
                     folder['period_id'], folder['folder_id'], meter_number,
@@ -159,7 +172,7 @@ class MobileService:
                     address=new_meter.get('address'),
                     walk_order=new_meter.get('walk_order'))
             except ValueError:
-                return 'invalid_data'
+                return reasons.INVALID_DATA
             self.folder_service.update_folder_progress(folder['folder_id'])
 
         # 3. Photo file to disk, before the reading's "done" marker
