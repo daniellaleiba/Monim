@@ -59,6 +59,32 @@ class ReadingService:
         if not reading:
             raise ValueError(f"קריאה {reading_id} לא נמצאה במערכת")
         return reading
+
+    def validate_mobile_reading(self, version_id: str, is_no_reading: bool, current_reading,
+            fault_code: str = None, exception_type: str = None) -> None:
+        """
+        Check a mobile reading's data, without touching the database.
+        Called by receive_mobile_reading, and by MobileService before it creates
+        anything (e.g. a meter added in the field), so a rejection writes nothing.
+
+        Raises: ValueError if the data is invalid
+        """
+        if not version_id:
+            raise ValueError("חסר מזהה גרסה לקריאה")
+
+        if is_no_reading:
+            if current_reading is not None:
+                raise ValueError("אי-קריאה לא יכולה לכלול ערך קריאה")
+            if not fault_code:
+                raise ValueError("אי-קריאה חייבת קוד סיבה")
+        elif not self._validate_current_reading(current_reading):
+            raise ValueError("ערך קריאה לא תקין: חייב להיות מספר")
+
+        if exception_type is not None:
+            if exception_type not in VALID_EXCEPTION_TYPES:
+                raise ValueError(f"סוג חריגה לא תקין: {exception_type}")
+            if not fault_code:
+                raise ValueError("חריגה מאומתת חייבת קוד תקלה")
  
     # --- CREATE:
  
@@ -165,32 +191,16 @@ class ReadingService:
         Returns: {'reading': the reading row, 'already_received': bool}
         Raises: ValueError if the data is invalid (nothing is written)
         """
-        if not version_id:
-            raise ValueError("חסר מזהה גרסה לקריאה")
-
         # 1. Already received this version? Nothing to do.
-        existing = self.repo.get_by_version_id(version_id)
+        existing = self.repo.get_by_version_id(version_id) if version_id else None
         if existing:
             return {'reading': existing, 'already_received': True}
 
         # 2. All checks, before any write
+        self.validate_mobile_reading(version_id, is_no_reading, current_reading,fault_code, exception_type)
         meter = self.meter_service.get_meter(period_meter_id)
         if not meter:
             raise ValueError(f"מונה {period_meter_id} לא נמצא במערכת")
-
-        if is_no_reading:
-            if current_reading is not None:
-                raise ValueError("אי-קריאה לא יכולה לכלול ערך קריאה")
-            if not fault_code:
-                raise ValueError("אי-קריאה חייבת קוד סיבה")
-        elif not self._validate_current_reading(current_reading):
-            raise ValueError("ערך קריאה לא תקין: חייב להיות מספר")
-
-        if exception_type is not None:
-            if exception_type not in VALID_EXCEPTION_TYPES:
-                raise ValueError(f"סוג חריגה לא תקין: {exception_type}")
-            if not fault_code:
-                raise ValueError("חריגה מאומתת חייבת קוד תקלה")
 
         is_exception = is_no_reading or exception_type is not None
         received_at = received_at or datetime.now()
@@ -232,8 +242,7 @@ class ReadingService:
                 reading_status='requires_review' if is_exception else 'approved',
                 transmitted_at=received_at, reading_time=read_at,
                 is_no_reading=is_no_reading, first_attempt_reading=first_attempt_reading,
-                exception_type=exception_type, photo_missing=photo_missing,
-                version_id=version_id)
+                exception_type=exception_type, photo_missing=photo_missing, version_id=version_id)
         except pg_errors.UniqueViolation:
             # The same version arrived twice at the same moment: the other request saved it
             return {'reading': self.repo.get_by_version_id(version_id), 'already_received': True}

@@ -26,6 +26,7 @@ class PeriodMeterService:
  
     Responsibilities:
         - Create period meters from parsed source file rows
+        - Create meters a reader found in the field (not in the source file)
         - Validate import data
         - Assign meters to work folders (with period matching)
         - Update current state after readings
@@ -79,7 +80,7 @@ class PeriodMeterService:
             raise ValueError("תיק העבודה לא שייך לאותה תקופה של המונה")
         return folder
     
-    # --- CREATE (from parsed source file):
+    # --- CREATE 
  
     def create_meters_from_parsed_rows(self, period_id: int, source_file_id: int, parsed_rows: List[dict]) -> int:
         """
@@ -135,6 +136,36 @@ class PeriodMeterService:
         # Bulk insert
         count = self.repo.bulk_create(period_id, source_file_id, parsed_rows)
         return count
+
+    def create_field_meter(self, period_id: int, folder_id: int, meter_number: str,
+            customer_number: str = None, customer_name: str = None, address: str = None,
+            walk_order: int = None) -> dict:
+        """
+        Create a meter a reader found in the field (it is not in the source file).
+        It belongs to the reader's folder, has no source file or row number,
+        and is marked added_in_field.
+
+        Note: the caller must refresh the folder's meter counts afterwards
+              (WorkFolderService.update_folder_progress). This service can't call it
+              itself: WorkFolderService already imports this one (circular import).
+
+        Returns: The created meter row
+        Raises: ValueError if the folder is not in the period, the meter number is
+                empty, or a meter with this number already exists in the period
+        """
+        self._ensure_period_exists(period_id)
+        self._ensure_folder_matches_period(folder_id, period_id)
+
+        if not self._validate_meter_number(meter_number):
+            raise ValueError("מספר מונה חסר")
+        meter_number = str(meter_number).strip()
+
+        if self.repo.get_by_period_and_meter_number(period_id, meter_number):
+            raise ValueError(f"מונה {meter_number} כבר קיים בתקופה")
+
+        return self.repo.create_field_meter(
+            period_id, folder_id, meter_number, customer_number=customer_number,
+            customer_name=customer_name, address=address, walk_order=walk_order)
     
     # --- READ:
  
@@ -204,7 +235,7 @@ class PeriodMeterService:
 
         return result
  
-    
+
     def assign_meters_to_folder(self, period_meter_ids: List[int], folder_id: int) -> int:
         """
         Assign multiple meters to a work folder.

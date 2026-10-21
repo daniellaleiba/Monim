@@ -25,7 +25,24 @@ Tests Summary:
    - Completed then corrected to an exception: folder progress goes back down
    - Same version_id twice: blocked by the database (UniqueViolation)
 
-Total: 11 tests
+3. Meter Added In The Field (4 tests)
+   - Created without source file or row, marked, folder count updated
+   - Existing meter number in the period (blocked)
+   - Folder from another period (blocked)
+   - A field meter receives a reading like any meter (progress 1/3)
+
+4. Receive A Batch (9 tests)
+   - Batch of two: both accepted in order; field time stored as local time
+   - Same batch twice: accepted again, nothing saved twice
+   - One bad reading does not fail the others (invalid_data, meter_not_found)
+   - Meter in another folder: meter_not_in_package / meter_exists_in_other_folder
+   - New meter from the field: created once, reading accepted, folder 1/3
+   - new_meter for a meter already in this folder: a regular reading
+   - Reading with a photo: file saved, one photo record even after a retransmission
+   - Photo flagged but not sent: missing_photo, nothing written
+   - Unknown package: the whole request fails
+
+Total: 36 tests
 """
 import sys, os, json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -43,6 +60,8 @@ from src.services.mobile_service import MobileService
 from datetime import datetime
 from src.services.reading_service import ReadingService
 from psycopg2 import errors as pg_errors
+import tempfile, shutil
+from datetime import timezone
 
 client_service = ClientService()
 reader_service = ReaderService()
@@ -52,7 +71,8 @@ meter_service = PeriodMeterService()
 template_service = FolderTemplateService()
 folder_service = WorkFolderService()
 fault_code_service = FaultCodeService()
-mobile_service = MobileService()
+PHOTO_DIR = tempfile.mkdtemp(prefix='monim_photos_')
+mobile_service = MobileService(photo_dir=PHOTO_DIR)  # Photos go to a temporary folder
 reading_service = ReadingService()
 
 READ_AT = datetime(2026, 10, 21, 9, 30)  # When the reading was taken in the field
@@ -63,6 +83,7 @@ PACKAGE_KEYS = {
     'include_previous_readings', 'meters',}
 METER_KEYS = { 'meter_number', 'customer_number', 'customer_name', 'address', 'walk_order', 'previous_reading', 'manager_notes',}
 
+# HELPERS
 
 def default_meter_rows():
     """Helper: two meters in walk order range 1000-2000"""
@@ -102,6 +123,39 @@ def create_folder_for_reader(corp_number, reader_username, release=True, include
 def first_meter(folder):
     """Helper: the first meter (MTR-MOB-001, previous reading 1234.5) of a test folder"""
     return meter_service.get_meter_by_number(folder['period_id'], 'MTR-MOB-001')
+
+
+# The read time the app sends (UTC), and what the server stores (local time)
+READ_AT_UTC = '2026-10-21T06:30:00.000Z'
+READ_AT_LOCAL = datetime(2026, 10, 21, 6, 30, tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
+
+class FakeUpload:
+    """Helper: stands in for Flask's FileStorage (has .filename and .save)"""
+    def __init__(self, content=b'fake image', filename='m1.jpg'):
+        self.content, self.filename = content, filename
+
+    def save(self, path):
+        with open(path, 'wb') as f:
+            f.write(self.content)
+
+def reading_item(version_id, meter_number='MTR-MOB-001', **overrides):
+    """Helper: one item of the transmit JSON list, as the app sends it"""
+    item = {'version_id': version_id, 'meter_number': meter_number, 'is_no_reading': False,
+            'current_reading': 1250.5, 'first_attempt_reading': None, 'exception_type': None,
+            'fault_code': None, 'notes': None, 'has_photo': False, 'photo_missing': False,
+            'read_at': READ_AT_UTC, 'latitude': None, 'longitude': None, 'new_meter': None}
+    item.update(overrides)
+    return item
+
+def add_other_folder(folder):
+    """Helper: a second folder in the same period, with meter MTR-MOB-OTHER (walk order 2500)"""
+    period = period_service.get_period(folder['period_id'])
+    template_service.create_template(period['client_id'], 4, "תיק אחר", 2001, 3000)
+    sf = source_file_service.get_period_source_file(folder['period_id'])
+    meter_service.create_meters_from_parsed_rows(folder['period_id'], sf['source_file_id'],
+        [{'row_number': 3, 'meter_number': 'MTR-MOB-OTHER', 'walk_order': 2500}])
+    folder_service.create_folders_for_period(folder['period_id'])
+    folder_service.distribute_meters_into_folders(folder['period_id'])
 
 #  1. DOWNLOAD PAYLOAD
 
@@ -463,6 +517,243 @@ def test_same_version_blocked_by_database():
     except Exception as e:
         report("UNIQUE על version_id", False, f"נזרק {type(e).__name__} ולא UniqueViolation")
 
+#  3. METER ADDED IN THE FIELD (PeriodMeterService.create_field_meter)
+
+def test_create_field_meter():
+    """מונה מהשטח: בלי קובץ ושורה, מסומן, בתיק של הקורא, והספירה של התיק מתעדכנת"""
+    try:
+        folder, _ = create_folder_for_reader("200000021", "mobile_reader_21")
+
+        meter = meter_service.create_field_meter(
+            folder['period_id'], folder['folder_id'], " 99887766 ",
+            customer_name="דוד כהן", address="הרצל 14", walk_order=1206)
+
+        assert meter['meter_number'] == "99887766"  # Trimmed
+        assert meter['added_in_field'] is True
+        assert meter['source_file_id'] is None
+        assert meter['row_number'] is None
+        assert meter['folder_id'] == folder['folder_id']
+        assert meter['work_status'] == 'assigned_to_reader'
+        assert meter['customer_name'] == "דוד כהן"
+        assert meter['walk_order'] == 1206
+
+        # The caller refreshes the folder counts: 2 meters from the file + 1 from the field
+        folder_service.update_folder_progress(folder['folder_id'])
+        assert folder_service.get_folder(folder['folder_id'])['total_meters'] == 3
+        report("מונה מהשטח - נוצר, מסומן, ספירת התיק 3", True)
+    except AssertionError as e:
+        report("מונה מהשטח - נוצר, מסומן, ספירת התיק 3", False, str(e))
+
+def test_create_field_meter_existing_number_blocked():
+    """מונה מהשטח עם מספר שכבר קיים בתקופה - חסום"""
+    folder, _ = create_folder_for_reader("200000022", "mobile_reader_22")
+    try:
+        meter_service.create_field_meter(folder['period_id'], folder['folder_id'], "MTR-MOB-001")
+        report("מונה מהשטח עם מספר קיים", False, "לא נזרקה שגיאה")
+    except ValueError as e:
+        try:
+            assert "כבר קיים" in str(e)
+            report("מונה מהשטח עם מספר קיים (חסום)", True)
+        except AssertionError as ae:
+            report("מונה מהשטח עם מספר קיים (חסום)", False, str(ae))
+
+def test_create_field_meter_folder_of_other_period_blocked():
+    """מונה מהשטח לתיק מתקופה אחרת - חסום"""
+    folder_a, _ = create_folder_for_reader("200000023", "mobile_reader_23")
+    folder_b, _ = create_folder_for_reader("200000024", "mobile_reader_24")
+    try:
+        meter_service.create_field_meter(folder_a['period_id'], folder_b['folder_id'], "99887766")
+        report("מונה מהשטח לתיק מתקופה אחרת", False, "לא נזרקה שגיאה")
+    except ValueError as e:
+        try:
+            assert "לא שייך" in str(e)
+            report("מונה מהשטח לתיק מתקופה אחרת (חסום)", True)
+        except AssertionError as ae:
+            report("מונה מהשטח לתיק מתקופה אחרת (חסום)", False, str(ae))
+
+def test_field_meter_can_receive_a_reading():
+    """מונה מהשטח מקבל קריאה כמו כל מונה, וההתקדמות נספרת מתוך 3"""
+    try:
+        folder, reader = create_folder_for_reader("200000025", "mobile_reader_25")
+        meter = meter_service.create_field_meter(folder['period_id'], folder['folder_id'], "99887766")
+        folder_service.update_folder_progress(folder['folder_id'])
+
+        result = reading_service.receive_mobile_reading(
+            meter['period_meter_id'], reader['reader_id'], version_id='v-field-1',
+            is_no_reading=False, current_reading=310.0, read_at=READ_AT)
+
+        assert result['reading']['reading_status'] == 'approved'
+        assert result['reading']['consumption'] is None  # No previous reading for a new meter
+        updated_folder = folder_service.get_folder(folder['folder_id'])
+        assert updated_folder['completed_meters'] == 1
+        assert updated_folder['total_meters'] == 3
+        report("מונה מהשטח מקבל קריאה - 1/3", True)
+    except AssertionError as e:
+        report("מונה מהשטח מקבל קריאה - 1/3", False, str(e))
+
+#  4. RECEIVE A BATCH (MobileService.receive_readings)
+
+def test_batch_of_readings_accepted():
+    """מנה של שתי קריאות: שתיהן מתקבלות, בסדר שנשלחו, וזמן השטח מומר לשעון מקומי"""
+    try:
+        folder, _ = create_folder_for_reader("200000031", "mobile_reader_31")
+
+        response = mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-batch-1'),
+            reading_item('v-batch-2', meter_number='MTR-MOB-002', current_reading=990.0),
+        ], photos={})
+
+        assert response == {'results': [
+            {'version_id': 'v-batch-1', 'status': 'accepted'},
+            {'version_id': 'v-batch-2', 'status': 'accepted'},
+        ]}
+        meter = first_meter(folder)
+        assert meter['work_status'] == 'completed'
+        reading = reading_service.get_latest_meter_reading(meter['period_meter_id'])
+        assert reading['reading_time'] == READ_AT_LOCAL  # 06:30Z → local time
+        assert folder_service.get_folder(folder['folder_id'])['completed_meters'] == 2
+        report("מנה של שתי קריאות - שתיהן מתקבלות", True)
+    except AssertionError as e:
+        report("מנה של שתי קריאות - שתיהן מתקבלות", False, str(e))
+
+def test_batch_sent_twice():
+    """אותה מנה פעמיים: גם בפעם השנייה accepted, ושום דבר לא נשמר פעמיים"""
+    try:
+        folder, _ = create_folder_for_reader("200000032", "mobile_reader_32")
+        batch = [reading_item('v-twice-1')]
+
+        mobile_service.receive_readings(folder['folder_id'], batch, photos={})
+        second = mobile_service.receive_readings(folder['folder_id'], batch, photos={})
+
+        assert second['results'][0]['status'] == 'accepted'
+        assert reading_service.count_meter_readings(first_meter(folder)['period_meter_id']) == 1
+        report("אותה מנה פעמיים - accepted, נשמר פעם אחת", True)
+    except AssertionError as e:
+        report("אותה מנה פעמיים - accepted, נשמר פעם אחת", False, str(e))
+
+def test_one_bad_reading_does_not_fail_the_others():
+    """קריאה לא תקינה ומונה לא קיים נדחים, והקריאה התקינה באותה מנה מתקבלת"""
+    try:
+        folder, _ = create_folder_for_reader("200000033", "mobile_reader_33")
+
+        response = mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-mix-1', is_no_reading=True, current_reading=100.0, fault_code='13'),
+            reading_item('v-mix-2', meter_number='NO-SUCH-METER'),
+            reading_item('v-mix-3', meter_number='MTR-MOB-002'),
+        ], photos={})
+
+        results = response['results']
+        assert results[0] == {'version_id': 'v-mix-1', 'status': 'rejected', 'reason': 'invalid_data'}
+        assert results[1] == {'version_id': 'v-mix-2', 'status': 'rejected', 'reason': 'meter_not_found'}
+        assert results[2] == {'version_id': 'v-mix-3', 'status': 'accepted'}
+        assert reading_service.count_meter_readings(first_meter(folder)['period_meter_id']) == 0
+        report("קריאה רעה לא מפילה את המנה", True)
+    except AssertionError as e:
+        report("קריאה רעה לא מפילה את המנה", False, str(e))
+
+def test_meter_in_another_folder():
+    """מונה מתיק אחר: בלי new_meter - meter_not_in_package, עם new_meter - meter_exists_in_other_folder"""
+    try:
+        folder, _ = create_folder_for_reader("200000034", "mobile_reader_34")
+        add_other_folder(folder)
+
+        response = mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-other-1', meter_number='MTR-MOB-OTHER'),
+            reading_item('v-other-2', meter_number='MTR-MOB-OTHER', new_meter={'customer_name': 'x'}),
+        ], photos={})
+
+        assert response['results'][0]['reason'] == 'meter_not_in_package'
+        assert response['results'][1]['reason'] == 'meter_exists_in_other_folder'
+        other = meter_service.get_meter_by_number(folder['period_id'], 'MTR-MOB-OTHER')
+        assert reading_service.count_meter_readings(other['period_meter_id']) == 0
+        report("מונה מתיק אחר - נדחה עם הסיבה הנכונה", True)
+    except AssertionError as e:
+        report("מונה מתיק אחר - נדחה עם הסיבה הנכונה", False, str(e))
+
+def test_new_meter_from_the_field():
+    """new_meter עם מספר חדש: המונה נוצר בתיק, והקריאה מתקבלת. שידור חוזר לא יוצר אותו שוב"""
+    try:
+        folder, _ = create_folder_for_reader("200000035", "mobile_reader_35")
+        batch = [reading_item('v-new-1', meter_number='99887766', current_reading=310.0,
+                              new_meter={'customer_name': 'דוד כהן', 'address': 'הרצל 14',
+                                         'customer_number': None, 'walk_order': 1206})]
+
+        first = mobile_service.receive_readings(folder['folder_id'], batch, photos={})
+        mobile_service.receive_readings(folder['folder_id'], batch, photos={})  # Retransmission
+
+        assert first['results'][0]['status'] == 'accepted'
+        meter = meter_service.get_meter_by_number(folder['period_id'], '99887766')
+        assert meter['added_in_field'] is True
+        assert meter['customer_name'] == 'דוד כהן'
+        assert reading_service.count_meter_readings(meter['period_meter_id']) == 1
+        updated_folder = folder_service.get_folder(folder['folder_id'])
+        assert updated_folder['total_meters'] == 3
+        assert updated_folder['completed_meters'] == 1
+        report("מונה מהשטח - נוצר פעם אחת, הקריאה מתקבלת", True)
+    except AssertionError as e:
+        report("מונה מהשטח - נוצר פעם אחת, הקריאה מתקבלת", False, str(e))
+
+def test_new_meter_already_in_this_folder():
+    """new_meter למונה שכבר בתיק: קריאה רגילה למונה הקיים, בלי ליצור מונה"""
+    try:
+        folder, _ = create_folder_for_reader("200000036", "mobile_reader_36")
+
+        response = mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-same-1', new_meter={'customer_name': 'x'})], photos={})
+
+        assert response['results'][0]['status'] == 'accepted'
+        assert len(meter_service.get_folder_meters(folder['folder_id'])) == 2  # No new meter
+        assert first_meter(folder)['work_status'] == 'completed'
+        report("new_meter למונה שכבר בתיק - קריאה רגילה", True)
+    except AssertionError as e:
+        report("new_meter למונה שכבר בתיק - קריאה רגילה", False, str(e))
+
+def test_reading_with_photo():
+    """קריאה עם תמונה: הקובץ נשמר, ורשומה אחת ב-photos, גם אחרי שידור חוזר"""
+    try:
+        folder, _ = create_folder_for_reader("200000037", "mobile_reader_37")
+        batch = [reading_item('v-pic-1', has_photo=True)]
+        photos = {'photo_MTR-MOB-001': FakeUpload()}
+
+        response = mobile_service.receive_readings(folder['folder_id'], batch, photos)
+        mobile_service.receive_readings(folder['folder_id'], batch, photos)  # Retransmission
+
+        assert response['results'][0]['status'] == 'accepted'
+        reading = reading_service.get_latest_meter_reading(first_meter(folder)['period_meter_id'])
+        photo_rows = mobile_service.photo_service.get_reading_photos(reading['reading_id'])
+        assert len(photo_rows) == 1
+        assert os.path.exists(photo_rows[0]['photo_path'])
+        assert photo_rows[0]['photo_path'].endswith('v-pic-1.jpg')
+        report("קריאה עם תמונה - קובץ ורשומה אחת", True)
+    except AssertionError as e:
+        report("קריאה עם תמונה - קובץ ורשומה אחת", False, str(e))
+
+def test_photo_flagged_but_not_sent():
+    """has_photo בלי קובץ בבקשה: missing_photo, ושום דבר לא נכתב"""
+    try:
+        folder, _ = create_folder_for_reader("200000038", "mobile_reader_38")
+
+        response = mobile_service.receive_readings(folder['folder_id'], [
+            reading_item('v-nopic-1', has_photo=True)], photos={})
+
+        assert response['results'][0] == {'version_id': 'v-nopic-1', 'status': 'rejected', 'reason': 'missing_photo'}
+        assert first_meter(folder)['work_status'] == 'assigned_to_reader'
+        report("תמונה מסומנת שלא הגיעה - missing_photo", True)
+    except AssertionError as e:
+        report("תמונה מסומנת שלא הגיעה - missing_photo", False, str(e))
+
+def test_unknown_package_fails_the_request():
+    """תיק שלא קיים - כל הבקשה נכשלת"""
+    try:
+        mobile_service.receive_readings(99999, [reading_item('v-x-1')], photos={})
+        report("תיק לא קיים", False, "לא נזרקה שגיאה")
+    except ValueError as e:
+        try:
+            assert "לא נמצא" in str(e)
+            report("תיק לא קיים (חסום)", True)
+        except AssertionError as ae:
+            report("תיק לא קיים (חסום)", False, str(ae))
+
 #  RUN ALL TESTS
 
 def main():
@@ -496,6 +787,25 @@ def main():
         test_completed_then_exception_recounts_progress()
         test_same_version_blocked_by_database()
 
+        # 3. Meter added in the field
+        print("\n=== בדיקות מונה מהשטח ===")
+        test_create_field_meter()
+        test_create_field_meter_existing_number_blocked()
+        test_create_field_meter_folder_of_other_period_blocked()
+        test_field_meter_can_receive_a_reading()
+
+        # 4. Receive a batch
+        print("\n=== בדיקות קבלת מנה ===")
+        test_batch_of_readings_accepted()
+        test_batch_sent_twice()
+        test_one_bad_reading_does_not_fail_the_others()
+        test_meter_in_another_folder()
+        test_new_meter_from_the_field()
+        test_new_meter_already_in_this_folder()
+        test_reading_with_photo()
+        test_photo_flagged_but_not_sent()
+        test_unknown_package_fails_the_request()
+
         # Summary
         print("\n" + "=" * 50)
         print_summary()
@@ -504,6 +814,7 @@ def main():
     finally:
         # Cleanup
         cleanup()
+        shutil.rmtree(PHOTO_DIR, ignore_errors=True)  # Remove the test photos
 
 
 if __name__ == "__main__":
